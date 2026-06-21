@@ -15,34 +15,49 @@ type RouteContext = {
 };
 
 export async function POST(request: Request, context: RouteContext) {
+  const { projectId } = await context.params;
   try {
-    const rate = await enforceRateLimit(`webhook:telegram:${getClientIp(request)}`, 300, 60);
+    const clientIp = getClientIp(request);
+    const rate = await enforceRateLimit(`webhook:telegram:${clientIp}`, 300, 60);
     if (!rate.allowed) {
+      logger.warn("telegram_webhook_rate_limited", { projectId, clientIp });
       return NextResponse.json(
         { error: "Too many requests" },
         { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds ?? 60) } },
       );
     }
 
-    const { projectId } = await context.params;
     const url = new URL(request.url);
     const secret = url.searchParams.get("secret");
 
     const project = await db.project.findUnique({ where: { id: projectId } });
 
     if (!project) {
+      logger.warn("telegram_webhook_reject", { projectId, reason: "project_not_found" });
       return NextResponse.json({ error: "Проект не найден" }, { status: 404 });
     }
 
     if (!(secret && project.webhookSecret) || secret !== project.webhookSecret) {
+      logger.warn("telegram_webhook_reject", {
+        projectId,
+        reason: "bad_secret",
+        hasSecretParam: !!secret,
+      });
       return NextResponse.json({ error: "Недопустимый секрет webhook" }, { status: 403 });
     }
 
     if (project.runtimeStatus !== "running" || project.deliveryMode !== "webhook") {
+      logger.warn("telegram_webhook_reject", {
+        projectId,
+        reason: "not_running",
+        runtimeStatus: project.runtimeStatus,
+        deliveryMode: project.deliveryMode,
+      });
       return NextResponse.json({ error: "Бот не запущен в режиме webhook" }, { status: 409 });
     }
 
     if (!project.botToken) {
+      logger.warn("telegram_webhook_reject", { projectId, reason: "no_token" });
       return NextResponse.json({ error: "Токен бота не задан" }, { status: 400 });
     }
 

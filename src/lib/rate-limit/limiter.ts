@@ -16,18 +16,31 @@ export async function checkRateLimit(
 ): Promise<RateLimitResult> {
   const redis = await getRedisClient();
   if (redis) {
-    const bucketKey = `ratelimit:${key}`;
-    const count = await redis.incr(bucketKey);
-    if (count === 1) {
-      await redis.expire(bucketKey, windowSeconds);
-    }
+    try {
+      const bucketKey = `ratelimit:${key}`;
+      const count = await redis.incr(bucketKey);
+      // Always make sure the bucket has a TTL. If the very first expire was ever
+      // lost, the counter would grow forever and permanently 429 — even across
+      // restarts, since the key lives in Redis. Re-arm the TTL whenever missing.
+      if (count === 1) {
+        await redis.expire(bucketKey, windowSeconds);
+      } else {
+        const ttl = await redis.ttl(bucketKey);
+        if (ttl < 0) {
+          await redis.expire(bucketKey, windowSeconds);
+        }
+      }
 
-    if (count > limit) {
-      const ttl = await redis.ttl(bucketKey);
-      return { allowed: false, retryAfterSeconds: Math.max(ttl, 1) };
-    }
+      if (count > limit) {
+        const ttl = await redis.ttl(bucketKey);
+        return { allowed: false, retryAfterSeconds: Math.max(ttl, 1) };
+      }
 
-    return { allowed: true };
+      return { allowed: true };
+    } catch {
+      // Never let a rate-limiter hiccup block real traffic — fail open.
+      return { allowed: true };
+    }
   }
 
   const now = Date.now();
