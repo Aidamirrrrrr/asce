@@ -30,9 +30,13 @@ function isPollingConflict(error: unknown): boolean {
   return error instanceof GrammyError && error.error_code === 409;
 }
 
-async function releaseTelegramPollingSession(token: string): Promise<void> {
+export async function clearTelegramWebhook(token: string): Promise<void> {
   const bot = new Bot(token);
-  await bot.api.deleteWebhook({ drop_pending_updates: true });
+  try {
+    await bot.api.deleteWebhook({ drop_pending_updates: true });
+  } catch {
+    // Webhook may not be set.
+  }
 }
 
 export function getActivePollingProjectIds(): ReadonlySet<string> {
@@ -82,7 +86,7 @@ async function startPollingLoop(project: Project, bot: Bot, botToken: string): P
         console.warn(
           `[bot:${project.id}] polling 409, retry ${attempt + 1}/${POLLING_CONFLICT_RETRIES}`,
         );
-        await releaseTelegramPollingSession(botToken);
+        await clearTelegramWebhook(botToken);
         await sleep(800 * (attempt + 1));
         registry.set(project.id, {
           bot,
@@ -127,7 +131,7 @@ export async function runPollingBot(project: Project): Promise<void> {
     }
 
     await haltPollingBot(project.id);
-    await releaseTelegramPollingSession(botToken);
+    await clearTelegramWebhook(botToken);
 
     const bot = createProjectBot(runtimeProject);
 

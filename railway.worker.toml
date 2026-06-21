@@ -1,0 +1,8 @@
+# Railway config for the bot-worker service (polling).
+# Duplicate the web service in Railway, point to this repo, set Config Path to railway.worker.toml.
+[build]
+buildCommand = "pnpm build"
+
+[deploy]
+preDeployCommand = "pnpm db:migrate:deploy"
+startCommand = "pnpm start:worker"

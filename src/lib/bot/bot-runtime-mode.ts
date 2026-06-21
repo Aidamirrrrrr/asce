@@ -14,7 +14,11 @@ export function isPollingDelegatedToWorker(): boolean {
   if (process.env.BOT_POLLING_DELEGATED === "0") {
     return false;
   }
-  return process.env.NODE_ENV === "development";
+  if (process.env.NODE_ENV === "development") {
+    return true;
+  }
+  // Production polling: long-lived getUpdates только в bot-worker (как в dev).
+  return process.env.BOT_DELIVERY_MODE === "polling";
 }
 
 export function shouldRunPollingInThisProcess(): boolean {

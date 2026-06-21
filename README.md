@@ -7,7 +7,7 @@ asce — ИИ-конструктор Telegram-ботов. Пользовател
 - **Next.js 16** (App Router, React 19) — веб-интерфейс и API-роуты.
 - **@xyflow/react** — визуальный редактор схемы (нод и связей).
 - **Prisma + PostgreSQL** — хранение проектов, схем, секретов, пользователей бота и событий.
-- **grammY** — рантайм Telegram-ботов (webhook в проде, polling в dev).
+- **grammY** — рантайм Telegram-ботов (webhook по умолчанию в prod, polling в dev или при `BOT_DELIVERY_MODE=polling`).
 - **OpenAI-совместимый ИИ-эндпоинт** (бета: Immers.cloud Qwen3-Coder) — генерация и доработка схем, ответы аналитического агента.
 - **shadcn/ui + Tailwind CSS 4** — UI-компоненты.
 
@@ -51,6 +51,7 @@ pnpm dev               # Next.js + bot-worker (polling в dev)
 - `AUTH_URL` — публичный URL приложения для Auth.js (обычно совпадает с `APP_URL`).
 - `SECRETS_ENC_KEY` — шифрование `botToken` и секретов проекта at-rest (обязателен в production).
 - `REDIS_URL` — сессии бота и rate limiting (в dev без Redis — in-memory fallback).
+- `BOT_DELIVERY_MODE` — `webhook` (по умолчанию в prod) или `polling` (нужен bot-worker).
 - `S3_*` / `AWS_*` — S3-совместимое хранилище (MinIO, AWS S3) при `MEDIA_STORAGE_DRIVER=s3`.
 - `SMTP_*` — вход по коду на email (без SMTP работает только пароль).
 - `YOOKASSA_*` — оплата подписки на платформу (опционально).
@@ -72,9 +73,10 @@ pnpm dev               # Next.js + bot-worker (polling в dev)
 **Сервисы в проекте:**
 
 1. **Web** — это приложение (подключить репозиторий).
-2. **PostgreSQL** — `DATABASE_URL=${{Postgres.DATABASE_URL}}` (internal URL, не PUBLIC).
-3. **Redis** — `REDIS_URL=${{Redis.REDIS_URL}}`.
-4. **MinIO** (или любой S3) — медиа-вложения ботов. Локальный диск (`MEDIA_STORAGE_DRIVER=local`) на Railway эфемерен: файлы пропадут при редеплое.
+2. **Bot-worker** (опционально, при `BOT_DELIVERY_MODE=polling`) — тот же репозиторий, **без публичного домена**, start: `pnpm start:worker`. Скопируйте env с web (`DATABASE_URL`, `REDIS_URL`, `SECRETS_ENC_KEY`, …) и добавьте `BOT_DELIVERY_MODE=polling`.
+3. **PostgreSQL** — `DATABASE_URL=${{Postgres.DATABASE_URL}}` (internal URL, не PUBLIC).
+4. **Redis** — `REDIS_URL=${{Redis.REDIS_URL}}`.
+5. **MinIO** (или любой S3) — медиа-вложения ботов. Локальный диск (`MEDIA_STORAGE_DRIVER=local`) на Railway эфемерен: файлы пропадут при редеплое.
 
 **Пример переменных (web-сервис):**
 
@@ -82,6 +84,9 @@ pnpm dev               # Next.js + bot-worker (polling в dev)
 NODE_ENV=production
 APP_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}
 AUTH_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}
+
+# Надёжнее webhook на Railway: polling + отдельный bot-worker сервис.
+BOT_DELIVERY_MODE=polling
 
 DATABASE_URL=${{Postgres.DATABASE_URL}}
 REDIS_URL=${{Redis.REDIS_URL}}
@@ -112,7 +117,9 @@ SMTP_FROM=asce <hello@asce.tech>
 
 Имена `${{MinIO.*}}` зависят от имени сервиса MinIO в Railway. Бакет из `S3_BUCKET` создаётся автоматически при первом обращении к хранилищу (нужны права на `CreateBucket` у `AWS_ACCESS_KEY_ID`). MinIO совместим с S3-драйвером (`S3_ENDPOINT` + `forcePathStyle`).
 
-С кастомным доменом (`asce.tech`) задайте `APP_URL` и `AUTH_URL` явно — это важно для Telegram webhook и ссылок в письмах.
+С кастомным доменом (`asce.tech`) задайте `APP_URL` и `AUTH_URL` явно — это важно для ссылок в письмах (и для webhook, если `BOT_DELIVERY_MODE=webhook`).
+
+После переключения на polling: в редакторе **остановите и снова запустите** бота — webhook снимется, воркер подхватит `getUpdates` в течение ~2 с.
 
 **Cron** (напоминания, отложенные задачи ботов) — раз в минуту:
 
@@ -146,7 +153,13 @@ pnpm start               # Next.js на порту 3000
 
 #### 3. Bot-worker (polling / отложенные задачи)
 
-В production боты работают через **webhook** (Next.js API). Отдельный воркер нужен для:
+В production по умолчанию боты работают через **webhook** (Next.js API). Для **polling** задайте `BOT_DELIVERY_MODE=polling` и поднимите воркер:
+
+```bash
+pnpm start:worker   # BOT_WORKER_PROCESS=1, long polling + отложенные задачи
+```
+
+Отдельный воркер также полезен для:
 
 - обработки отложенных задач (`ScheduledFlowJob`), если не используется внешний cron;
 - polling-режима в dev (запускается автоматически через `pnpm dev`).
@@ -182,6 +195,7 @@ WantedBy=multi-user.target
 - `pnpm dev` — дев-сервер (web + bot-worker).
 - `pnpm dev:web` / `pnpm dev:worker` — компоненты по отдельности.
 - `pnpm build` / `pnpm start` — продакшен-сборка и запуск.
+- `pnpm start:worker` — bot-worker (polling в prod при `BOT_DELIVERY_MODE=polling`).
 - `pnpm lint` / `pnpm lint:fix` — проверка/автофикс через Biome.
 - `pnpm test` — юнит-тесты (Vitest).
 - `pnpm db:migrate` — миграции в dev (`migrate dev`).

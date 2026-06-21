@@ -8,6 +8,7 @@
     "dev:worker": "BOT_WORKER_PROCESS=1 tsx scripts/bot-worker.ts",
     "build": "next build",
     "start": "next start",
+    "start:worker": "BOT_WORKER_PROCESS=1 tsx scripts/bot-worker.ts",
     "lint": "biome check --error-on-warnings",
     "lint:fix": "biome check --write",
     "test": "vitest run",

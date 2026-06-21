@@ -18,7 +18,25 @@ export function isDeliveryMode(value: string): value is DeliveryMode {
   return value === "webhook" || value === "polling";
 }
 
-/** В development — polling (без публичного APP_URL); в production — webhook. */
+/**
+ * Режим доставки апдейтов Telegram.
+ * BOT_DELIVERY_MODE переопределяет всё (в т.ч. production).
+ * Иначе: dev → polling, prod → webhook (или polling из БД проекта).
+ */
+export function resolveDeliveryMode(projectDeliveryMode?: DeliveryMode): DeliveryMode {
+  const forced = process.env.BOT_DELIVERY_MODE?.trim();
+  if (forced && isDeliveryMode(forced)) {
+    return forced;
+  }
+
+  if (process.env.NODE_ENV === "development") {
+    return "polling";
+  }
+
+  return projectDeliveryMode === "polling" ? "polling" : "webhook";
+}
+
+/** Режим для новых проектов. */
 export function getDefaultDeliveryMode(): DeliveryMode {
-  return process.env.NODE_ENV === "development" ? "polling" : "webhook";
+  return resolveDeliveryMode();
 }

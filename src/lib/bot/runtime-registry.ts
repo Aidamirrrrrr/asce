@@ -6,10 +6,10 @@ import { createDefaultFlow } from "@/lib/flow/default-flow";
 import { loadFlowDocument } from "@/lib/flow/load-flow-document";
 
 import { isPollingDelegatedToWorker, shouldRunPollingInThisProcess } from "./bot-runtime-mode";
-import { buildWebhookUrl, type DeliveryMode } from "./config";
+import { buildWebhookUrl, resolveDeliveryMode } from "./config";
 import { createProjectBot } from "./create-project-bot";
 import { collectRequiredSecretKeys, flowHasTrigger } from "./flow-executor";
-import { haltPollingBot, runPollingBot } from "./polling-runtime";
+import { clearTelegramWebhook, haltPollingBot, runPollingBot } from "./polling-runtime";
 import { markProjectError, markProjectStopped } from "./project-runtime-status";
 import { findMissingRequiredSecrets } from "./project-secrets";
 import { requireDecryptedBotToken, withDecryptedBotToken } from "./project-token";
@@ -88,12 +88,7 @@ async function startProjectBotInner(project: Project): Promise<void> {
   await validateProjectSecretsForStart(project);
 
   const readyProject = await ensureProjectWebhookSecret(project);
-  const mode: DeliveryMode =
-    process.env.NODE_ENV === "production"
-      ? "webhook"
-      : readyProject.deliveryMode === "polling"
-        ? "polling"
-        : "webhook";
+  const mode = resolveDeliveryMode(readyProject.deliveryMode);
   const delegatedPolling =
     mode === "polling" && isPollingDelegatedToWorker() && !shouldRunPollingInThisProcess();
 
@@ -104,6 +99,9 @@ async function startProjectBotInner(project: Project): Promise<void> {
   if (mode === "polling") {
     if (shouldRunPollingInThisProcess()) {
       await runPollingBot(withDecryptedBotToken(readyProject));
+    } else {
+      // Снимаем webhook сразу, иначе Telegram шлёт POST на Next.js до старта воркера.
+      await clearTelegramWebhook(requireDecryptedBotToken(readyProject));
     }
   } else {
     if (!readyProject.webhookSecret) {

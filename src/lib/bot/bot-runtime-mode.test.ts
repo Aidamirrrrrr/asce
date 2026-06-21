@@ -33,4 +33,13 @@ describe("bot-runtime-mode", () => {
     expect(isPollingDelegatedToWorker()).toBe(false);
     expect(shouldRunPollingInThisProcess()).toBe(true);
   });
+
+  it("delegates production polling to worker by default", () => {
+    delete process.env.BOT_WORKER_PROCESS;
+    delete process.env.BOT_POLLING_DELEGATED;
+    process.env.NODE_ENV = "production";
+    process.env.BOT_DELIVERY_MODE = "polling";
+    expect(isPollingDelegatedToWorker()).toBe(true);
+    expect(shouldRunPollingInThisProcess()).toBe(false);
+  });
 });
