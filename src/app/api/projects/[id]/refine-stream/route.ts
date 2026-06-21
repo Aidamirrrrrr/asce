@@ -153,18 +153,12 @@ export async function POST(request: Request, context: RouteContext) {
           return;
         }
 
-        if (existing.runtimeStatus === "running") {
-          await stopProjectBot(existing);
-        }
-
+        // flowJson changes don't require a restart — the bot reads fresh from DB on every message.
         const project = await db.project.update({
           where: { id },
           data: {
             flowJson: serializeFlowJson(result.flow),
             chatJson: serializeChatJson(result.messages),
-            ...(existing.runtimeStatus === "running"
-              ? { runtimeStatus: "stopped", status: "draft" }
-              : {}),
           },
         });
 

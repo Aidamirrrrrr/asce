@@ -69,8 +69,8 @@ export async function PATCH(request: Request, context: RouteContext) {
       return NextResponse.json({ error: "Недопустимый режим доставки" }, { status: 400 });
     }
 
-    const isRuntimeChange =
-      body.botToken !== undefined || body.deliveryMode !== undefined || body.flowJson !== undefined;
+    // flowJson changes don't require a restart — the bot reads fresh from DB on every message.
+    const isRuntimeChange = body.botToken !== undefined || body.deliveryMode !== undefined;
 
     if (isRuntimeChange && existing.runtimeStatus === "running") {
       await stopProjectBot(existing);
