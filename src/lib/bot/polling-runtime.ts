@@ -4,6 +4,7 @@ import type { Project } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 
 import { createProjectBot } from "./create-project-bot";
+import { acquirePollingLock, type PollingLock } from "./polling-lock";
 import { markProjectError } from "./project-runtime-status";
 import { decryptBotTokenFromStorage, withDecryptedBotToken } from "./project-token";
 
@@ -15,6 +16,7 @@ type PollingEntry = {
   botToken: string;
   flowJson: string;
   started: boolean;
+  lock: PollingLock;
 };
 
 const registry = new Map<string, PollingEntry>();
@@ -69,7 +71,9 @@ export function isPollingBotRunning(
   if (!entry?.started) {
     return false;
   }
-  return tokensMatch(entry.botToken, project.botToken) && entry.flowJson === (project.flowJson ?? "");
+  return (
+    tokensMatch(entry.botToken, project.botToken) && entry.flowJson === (project.flowJson ?? "")
+  );
 }
 
 export async function haltPollingBot(projectId: string): Promise<void> {
@@ -84,12 +88,18 @@ export async function haltPollingBot(projectId: string): Promise<void> {
     console.warn(`[bot:${projectId}] stop polling:`, error);
   } finally {
     registry.delete(projectId);
+    await entry.lock.release();
   }
 
   await sleep(POLLING_START_DELAY_MS);
 }
 
-async function startPollingLoop(project: Project, bot: Bot, botToken: string): Promise<void> {
+async function startPollingLoop(
+  project: Project,
+  bot: Bot,
+  botToken: string,
+  lock: PollingLock,
+): Promise<void> {
   for (let attempt = 0; attempt < POLLING_CONFLICT_RETRIES; attempt += 1) {
     try {
       // bot.start() резолвится только при остановке бота, поэтому started
@@ -117,9 +127,12 @@ async function startPollingLoop(project: Project, bot: Bot, botToken: string): P
           botToken,
           flowJson: project.flowJson ?? "",
           started: false,
+          lock,
         });
         continue;
       }
+
+      await lock.release();
 
       if (isPollingConflict(error)) {
         await markProjectError(
@@ -136,7 +149,7 @@ async function startPollingLoop(project: Project, bot: Bot, botToken: string): P
   }
 }
 
-export async function runPollingBot(project: Project): Promise<void> {
+export async function runPollingBot(project: Project): Promise<boolean> {
   const runtimeProject = withDecryptedBotToken(project);
   if (!runtimeProject.botToken) {
     throw new Error("Токен бота не задан");
@@ -145,16 +158,25 @@ export async function runPollingBot(project: Project): Promise<void> {
   const botToken = runtimeProject.botToken;
 
   if (startingProjects.has(project.id)) {
-    return;
+    return false;
   }
 
   startingProjects.add(project.id);
   try {
     if (isPollingBotRunning(project)) {
-      return;
+      return false;
     }
 
     await haltPollingBot(project.id);
+
+    // Один поллер на бота на весь кластер: если лок держит другой процесс
+    // (старый контейнер при передеплое, вторая реплика) — не стартуем, иначе
+    // оба дёргают getUpdates и ловят 409.
+    const lock = await acquirePollingLock(project.id);
+    if (!lock) {
+      return false;
+    }
+
     await clearTelegramWebhook(botToken);
 
     const bot = createProjectBot(runtimeProject);
@@ -170,9 +192,10 @@ export async function runPollingBot(project: Project): Promise<void> {
       botToken,
       flowJson: project.flowJson ?? "",
       started: false,
+      lock,
     });
 
-    void startPollingLoop(project, bot, botToken);
+    void startPollingLoop(project, bot, botToken, lock);
 
     await db.project.update({
       where: { id: project.id },
@@ -181,6 +204,8 @@ export async function runPollingBot(project: Project): Promise<void> {
         runtimeStatus: "running",
       },
     });
+
+    return true;
   } finally {
     startingProjects.delete(project.id);
   }
@@ -198,5 +223,7 @@ export function pollingBotNeedsRestart(
     return true;
   }
 
-  return !tokensMatch(entry.botToken, project.botToken) || entry.flowJson !== (project.flowJson ?? "");
+  return (
+    !tokensMatch(entry.botToken, project.botToken) || entry.flowJson !== (project.flowJson ?? "")
+  );
 }

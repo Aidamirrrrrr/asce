@@ -61,8 +61,10 @@ async function syncPollingBotsInner(): Promise<void> {
     }
 
     try {
-      await runPollingBot(project);
-      console.log(`[worker] polling started: ${project.id} (${project.name})`);
+      const started = await runPollingBot(project);
+      if (started) {
+        console.log(`[worker] polling started: ${project.id} (${project.name})`);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Ошибка запуска polling";
       console.error(`[worker] ${project.id}:`, message);
