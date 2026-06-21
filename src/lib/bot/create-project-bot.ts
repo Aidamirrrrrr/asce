@@ -58,8 +58,29 @@ export function createProjectBot(project: Pick<Project, "id" | "botToken">): Bot
   const bot = new Bot(project.botToken);
 
   bot.use(async (ctx, next) => {
-    await upsertKnownChatFromContext(project.id, ctx);
-    await recordBotUserFromContext(project.id, ctx);
+    const startedAt = Date.now();
+    logger.info("bot_mw_enter", {
+      projectId: project.id,
+      chatId: ctx.chat?.id ?? null,
+      updateId: ctx.update.update_id,
+    });
+    try {
+      await upsertKnownChatFromContext(project.id, ctx);
+      await recordBotUserFromContext(project.id, ctx);
+    } catch (error) {
+      // Don't let analytics bookkeeping block the actual flow handlers.
+      logger.error("bot_mw_error", {
+        projectId: project.id,
+        chatId: ctx.chat?.id ?? null,
+        message: error instanceof Error ? error.message : "unknown",
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+    }
+    logger.info("bot_mw_done", {
+      projectId: project.id,
+      chatId: ctx.chat?.id ?? null,
+      ms: Date.now() - startedAt,
+    });
     await next();
   });
 
@@ -164,6 +185,12 @@ export function createProjectBot(project: Pick<Project, "id" | "botToken">): Bot
     try {
       const current = await db.project.findUnique({ where: { id: project.id } });
       if (!current || current.runtimeStatus !== "running") {
+        logger.warn("bot_skip_not_running", {
+          projectId: project.id,
+          chatId: ctx.chat?.id ?? null,
+          found: !!current,
+          runtimeStatus: current?.runtimeStatus ?? null,
+        });
         return;
       }
 
@@ -241,6 +268,13 @@ export function createProjectBot(project: Pick<Project, "id" | "botToken">): Bot
   bot.on("callback_query:data", async (ctx) => {
     const data = ctx.callbackQuery.data;
     const parsed = parseCallbackData(data);
+    logger.info("bot_handler_callback", {
+      projectId: project.id,
+      chatId: ctx.chat?.id ?? null,
+      data,
+      parsedNodeId: parsed?.nodeId ?? null,
+      parsedButtonId: parsed?.buttonId ?? null,
+    });
 
     if (!parsed) {
       await ctx.answerCallbackQuery();
@@ -326,8 +360,27 @@ export function createProjectBot(project: Pick<Project, "id" | "botToken">): Bot
       const isCommandTrigger = messageMatchesCommandTrigger(flow, userMessage);
 
       const inputSession = isCommandTrigger ? null : await getInputWaitSession(project.id, chatId);
+      const replySessionPeek = isCommandTrigger
+        ? null
+        : await getReplyKeyboardSession(project.id, chatId);
+      logger.info("bot_inbound_routing", {
+        projectId: project.id,
+        chatId,
+        textPreview: userMessage.slice(0, 60),
+        isCommandTrigger,
+        hasInputSession: !!inputSession,
+        inputWaitNodeId: inputSession?.nodeId ?? null,
+        hasReplySession: !!replySessionPeek,
+      });
+
       if (inputSession) {
         await clearInputWaitSession(project.id, chatId);
+        logger.info("bot_route_input_wait", {
+          projectId: project.id,
+          chatId,
+          nodeId: inputSession.nodeId,
+          variableKey: inputSession.variableKey,
+        });
 
         const result = await executeFlowFromInputWait(
           flow,
@@ -341,12 +394,15 @@ export function createProjectBot(project: Pick<Project, "id" | "botToken">): Bot
         return;
       }
 
-      const replySession = isCommandTrigger
-        ? null
-        : await getReplyKeyboardSession(project.id, chatId);
+      const replySession = replySessionPeek;
       if (replySession) {
         const match = findReplyButtonMatch(flow, replySession.nodeId, userMessage);
         await clearReplyKeyboardSession(project.id, chatId);
+        logger.info("bot_route_reply_session", {
+          projectId: project.id,
+          chatId,
+          matched: !!match,
+        });
 
         if (match) {
           const result = await executeFlowFromReply(
@@ -368,6 +424,7 @@ export function createProjectBot(project: Pick<Project, "id" | "botToken">): Bot
         userMessage,
         outboundPort,
       );
+      logger.info("bot_route_trigger", { projectId: project.id, chatId, handled });
 
       if (!handled) {
         if (outboundPort.executionContext.chatId) {
@@ -383,6 +440,11 @@ export function createProjectBot(project: Pick<Project, "id" | "botToken">): Bot
 
   bot.on("message:text", async (ctx) => {
     const messageText = ctx.message.text;
+    logger.info("bot_handler_message_text", {
+      projectId: project.id,
+      chatId: ctx.chat?.id ?? null,
+      textPreview: messageText.slice(0, 60),
+    });
     await processInboundUserMessage(ctx, messageText);
   });
 

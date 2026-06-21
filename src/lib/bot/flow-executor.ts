@@ -228,10 +228,19 @@ async function executeAdminNotifyNode(
   const text = interpolateTemplate(normalized.text, port.executionContext.vars, null).trim();
 
   if (!(chatId && text)) {
+    logger.warn("admin_notify_skipped", {
+      projectId: port.executionContext.projectId,
+      hasChatId: !!chatId,
+      hasText: !!text,
+    });
     return;
   }
 
   await port.sendToChat?.(chatId, stripTextEmojisOptional(text) ?? text);
+  logger.info("admin_notify_sent", {
+    projectId: port.executionContext.projectId,
+    targetChatId: chatId,
+  });
 }
 
 async function executeJsonExtractNode(
@@ -407,6 +416,12 @@ async function walkFromNode(
   if (!node || node.type === "trigger") {
     return;
   }
+
+  logger.info("flow_node_walk", {
+    projectId: port.executionContext.projectId,
+    nodeId: node.id,
+    nodeType: node.type,
+  });
 
   port.onNodeExecuted?.({ id: node.id, type: node.type });
 
@@ -602,6 +617,10 @@ export async function executeFlowFromCallback(
 ): Promise<FlowWalkResult | undefined> {
   const messageNode = getMessageNode(flow, nodeId);
   if (!messageNode) {
+    logger.warn("callback_no_message_node", {
+      projectId: port.executionContext.projectId,
+      nodeId,
+    });
     return;
   }
 
@@ -610,6 +629,11 @@ export async function executeFlowFromCallback(
   );
 
   if (!edge) {
+    logger.warn("callback_no_edge", {
+      projectId: port.executionContext.projectId,
+      nodeId,
+      buttonId,
+    });
     return;
   }
 
