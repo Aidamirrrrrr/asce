@@ -289,7 +289,7 @@ export type MessageSourceHandle = {
 };
 
 export function getMessageSourceHandles(data: MessageNodeData): MessageSourceHandle[] {
-  const handles: MessageSourceHandle[] = [{ id: "next", label: "Далее" }];
+  const handles: MessageSourceHandle[] = [];
   const keyboard = data.keyboard;
 
   if (keyboard?.type === "inline") {
@@ -310,6 +310,11 @@ export function getMessageSourceHandles(data: MessageNodeData): MessageSourceHan
         }
       }
     }
+  }
+
+  // «Далее» только у линейных сообщений без ветвления по кнопкам.
+  if (handles.length === 0) {
+    handles.push({ id: "next", label: "Далее" });
   }
 
   return handles;

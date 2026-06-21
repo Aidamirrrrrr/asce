@@ -332,14 +332,15 @@ export function migrateFlowDocument(doc: BotFlowDocument): BotFlowDocument {
 
 export function sanitizeFlowDocument(doc: BotFlowDocument): BotFlowDocument {
   const migrated = migrateFlowDocument(doc);
+  const nodes = migrated.nodes.map(({ className: _className, data, ...node }) => ({
+    ...node,
+    data: stripFlowNodeTransientData(data),
+  }));
 
   return {
     ...migrated,
-    nodes: migrated.nodes.map(({ className: _className, data, ...node }) => ({
-      ...node,
-      data: stripFlowNodeTransientData(data),
-    })),
-    edges: migrated.edges.map(({ className: _className, ...edge }) => edge),
+    nodes,
+    edges: pruneInvalidEdges(nodes, migrated.edges).map(({ className: _className, ...edge }) => edge),
   };
 }
 

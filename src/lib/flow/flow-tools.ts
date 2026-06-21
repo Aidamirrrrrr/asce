@@ -1,6 +1,6 @@
 import { FLOW_BUS_EDGE_TYPE } from "@/lib/flow/branch-handle-utils";
 import { isValidSourceHandle } from "@/lib/flow/condition-node-utils";
-import { buttonLabelMatches, normalizeBranchLabel } from "@/lib/flow/flow-button-wiring";
+import { buttonLabelMatches, getBranchableMessageHandles, normalizeBranchLabel } from "@/lib/flow/flow-button-wiring";
 import {
   type BotFlowDocument,
   createDefaultNodeData,
@@ -388,6 +388,17 @@ export function connectNodes(doc: BotFlowDocument, args: ConnectArgs): FlowToolR
   }
 
   if (!isValidSourceHandle(sourceNode, handle)) {
+    const branchButtons = getBranchableMessageHandles(sourceNode);
+    if (branchButtons.length > 0 && handle === "next") {
+      const available = branchButtons.map((button) => `"${button.label}"`).join(", ");
+      return {
+        ok: false,
+        error:
+          `У сообщения с кнопками нельзя связать ветку "next". ` +
+          `Используй connect_nodes с buttonText. Доступные кнопки: ${available}`,
+      };
+    }
+
     return {
       ok: false,
       error: `Ветка "${handle}" недопустима для узла типа ${sourceNode.type}. Доступно: ${validHandlesFor(

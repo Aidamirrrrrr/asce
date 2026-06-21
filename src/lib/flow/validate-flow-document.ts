@@ -1,6 +1,7 @@
 import { findUnwiredBranchButtons } from "@/lib/flow/flow-button-wiring";
 import { splitIntoTriggerLanes } from "@/lib/flow/flow-layout";
 import type { BotFlowDocument, FlowNode } from "@/lib/flow/flow-schema";
+import { normalizeMessageNodeData } from "@/lib/flow/message-node-utils";
 import { inferSecretRecipesFromText } from "@/lib/flow/secret-recipes";
 
 export type FlowValidationIssue = {
@@ -414,6 +415,7 @@ export function validateFlowDocument(doc: BotFlowDocument): FlowValidationIssue[
   issues.push(...findMissingPaymentSecrets(doc));
   issues.push(...findInvalidInactivityTriggers(doc));
   issues.push(...findUnwiredCallbackButtons(doc));
+  issues.push(...findSpuriousNextEdgesFromKeyboardMenus(doc));
   issues.push(...findNodeContentIssues(doc));
   issues.push(...findDuplicateIdsAndKeys(doc));
   issues.push(...findUnconnectedBranches(doc));
@@ -429,6 +431,44 @@ function findUnwiredCallbackButtons(doc: BotFlowDocument): FlowValidationIssue[]
     message: `Кнопка «${issue.buttonLabel}» ни к чему не подключена`,
     nodeLabel: issue.sourceLabel,
   }));
+}
+
+function findSpuriousNextEdgesFromKeyboardMenus(doc: BotFlowDocument): FlowValidationIssue[] {
+  const issues: FlowValidationIssue[] = [];
+  const nodeById = new Map(doc.nodes.map((node) => [node.id, node]));
+
+  for (const edge of doc.edges) {
+    if ((edge.sourceHandle ?? "next") !== "next") {
+      continue;
+    }
+
+    const source = nodeById.get(edge.source);
+    if (source?.type !== "message") {
+      continue;
+    }
+
+    const data = normalizeMessageNodeData(source.data);
+    const hasBranchButtons =
+      (data.keyboard?.type === "inline" &&
+        data.keyboard.rows.some((row) => row.some((button) => button.kind === "callback"))) ||
+      (data.keyboard?.type === "reply" &&
+        data.keyboard.rows.some((row) => row.some((button) => button.kind === "text")));
+
+    if (!hasBranchButtons) {
+      continue;
+    }
+
+    const target = nodeById.get(edge.target);
+    issues.push({
+      severity: "error",
+      message:
+        `Лишняя связь «Далее» от меню с кнопками к «${target?.data?.label ?? edge.target}». ` +
+        "Удали её или привяжи экран через connect_nodes с buttonText.",
+      nodeLabel: source.data.label,
+    });
+  }
+
+  return issues;
 }
 
 function findInvalidInactivityTriggers(doc: BotFlowDocument): FlowValidationIssue[] {

@@ -79,3 +79,27 @@ describe("validateFlowDocument — обрезанные тексты сообщ�
     expect(issues.some((i) => truncErr.test(i.message))).toBe(false);
   });
 });
+
+describe("validateFlowDocument — spurious next from keyboard menus", () => {
+  it("flags a next edge from an inline keyboard message", () => {
+    const doc: BotFlowDocument = {
+      nodes: [
+        node("menu", "message", {
+          label: "Меню",
+          text: "Выберите",
+          keyboard: {
+            type: "inline",
+            rows: [[{ id: "b1", text: "Продукты", kind: "callback" }]],
+          },
+        }),
+        node("branch", "message", { label: "Продукты", text: "Раздел продуктов" }),
+      ],
+      edges: [edge("menu", "branch", "next"), edge("menu", "branch", "btn-b1")],
+    };
+
+    const issues = validateFlowDocument(doc);
+    expect(
+      issues.some((issue) => issue.severity === "error" && /лишняя связь «далее»/i.test(issue.message)),
+    ).toBe(true);
+  });
+});
