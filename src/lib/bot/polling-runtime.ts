@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 
 import { createProjectBot } from "./create-project-bot";
 import { markProjectError } from "./project-runtime-status";
-import { withDecryptedBotToken } from "./project-token";
+import { decryptBotTokenFromStorage, withDecryptedBotToken } from "./project-token";
 
 const POLLING_START_DELAY_MS = 350;
 const POLLING_CONFLICT_RETRIES = 5;
@@ -30,6 +30,25 @@ function isPollingConflict(error: unknown): boolean {
   return error instanceof GrammyError && error.error_code === 409;
 }
 
+/**
+ * Реестр хранит расшифрованный токен, а кандидаты из БД приходят зашифрованными.
+ * decryptBotTokenFromStorage идемпотентен (расшифрованное значение вернёт как есть),
+ * поэтому нормализуем обе стороны к расшифрованному виду перед сравнением.
+ */
+function tokensMatch(entryToken: string, projectToken: string | null | undefined): boolean {
+  if (!projectToken) {
+    return false;
+  }
+  if (entryToken === projectToken) {
+    return true;
+  }
+  try {
+    return entryToken === decryptBotTokenFromStorage(projectToken);
+  } catch {
+    return false;
+  }
+}
+
 export async function clearTelegramWebhook(token: string): Promise<void> {
   const bot = new Bot(token);
   try {
@@ -50,7 +69,7 @@ export function isPollingBotRunning(
   if (!entry?.started) {
     return false;
   }
-  return entry.botToken === project.botToken && entry.flowJson === (project.flowJson ?? "");
+  return tokensMatch(entry.botToken, project.botToken) && entry.flowJson === (project.flowJson ?? "");
 }
 
 export async function haltPollingBot(projectId: string): Promise<void> {
@@ -73,11 +92,16 @@ export async function haltPollingBot(projectId: string): Promise<void> {
 async function startPollingLoop(project: Project, bot: Bot, botToken: string): Promise<void> {
   for (let attempt = 0; attempt < POLLING_CONFLICT_RETRIES; attempt += 1) {
     try {
-      await bot.start();
-      const entry = registry.get(project.id);
-      if (entry) {
-        entry.started = true;
-      }
+      // bot.start() резолвится только при остановке бота, поэтому started
+      // выставляем в onStart — он срабатывает, когда long polling реально начался.
+      await bot.start({
+        onStart: () => {
+          const entry = registry.get(project.id);
+          if (entry) {
+            entry.started = true;
+          }
+        },
+      });
       return;
     } catch (error) {
       registry.delete(project.id);
@@ -174,5 +198,5 @@ export function pollingBotNeedsRestart(
     return true;
   }
 
-  return entry.botToken !== project.botToken || entry.flowJson !== (project.flowJson ?? "");
+  return !tokensMatch(entry.botToken, project.botToken) || entry.flowJson !== (project.flowJson ?? "");
 }
