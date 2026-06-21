@@ -197,19 +197,22 @@ function FlowEditorInner({
 
   const displayEdges = useMemo(
     () =>
-      edges
-        .filter((edge) => !backNavigation.backEdgeIds.has(edge.id))
-        .map((edge, index) => ({
+      edges.map((edge, index) => {
+        const isBack = backNavigation.backEdgeIds.has(edge.id);
+        return {
           ...withFlowBusEdgeType(edge),
           style: {
             ...edge.style,
-            opacity: isFlowGenerating || revealed ? 1 : 0,
+            opacity: isBack ? 0 : isFlowGenerating || revealed ? 1 : 0,
+            pointerEvents: isBack ? ("none" as const) : undefined,
             transition:
-              !isFlowGenerating && revealed
+              !isBack && !isFlowGenerating && revealed
                 ? `opacity ${duration.slow}s ease ${0.12 + index * 0.05}s`
                 : undefined,
           },
-        })),
+          interactionWidth: isBack ? 0 : undefined,
+        };
+      }),
     [edges, revealed, isFlowGenerating, backNavigation],
   );
 

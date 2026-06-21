@@ -224,6 +224,7 @@ export function createProjectBot(project: Pick<Project, "id" | "botToken">): Bot
     const parsed = parseCallbackData(data);
 
     if (!parsed) {
+      await ctx.answerCallbackQuery();
       return;
     }
 
@@ -234,32 +235,34 @@ export function createProjectBot(project: Pick<Project, "id" | "botToken">): Bot
       nodeId: parsed.nodeId,
     });
 
-    await runWithErrorHandling(ctx, async () => {
-      const current = await db.project.findUnique({ where: { id: project.id } });
-      if (!current) {
-        return;
-      }
+    try {
+      await runWithErrorHandling(ctx, async () => {
+        const current = await db.project.findUnique({ where: { id: project.id } });
+        if (!current) {
+          return;
+        }
 
-      const flow = loadFlowDocument(current.flowJson, createDefaultFlow());
-      const userMessage = ctx.callbackQuery.message?.text ?? "";
-      const outboundPort = await createOutboundPort(ctx, current.flowJson, undefined, userMessage);
+        const flow = loadFlowDocument(current.flowJson, createDefaultFlow());
+        const userMessage = ctx.callbackQuery.message?.text ?? "";
+        const outboundPort = await createOutboundPort(ctx, current.flowJson, undefined, userMessage);
 
-      const result = await executeFlowFromCallback(
-        flow,
-        parsed.nodeId,
-        parsed.buttonId,
-        userMessage,
-        outboundPort,
-      );
+        const result = await executeFlowFromCallback(
+          flow,
+          parsed.nodeId,
+          parsed.buttonId,
+          userMessage,
+          outboundPort,
+        );
 
-      await applyFlowWalkSessions(ctx.chat?.id ?? 0, result);
+        await applyFlowWalkSessions(ctx.chat?.id ?? 0, result);
 
-      if (ctx.chat?.id) {
-        await touchInactivityTimers(ctx.chat.id, flow, outboundPort.executionContext);
-      }
-
-      await ctx.answerCallbackQuery();
-    });
+        if (ctx.chat?.id) {
+          await touchInactivityTimers(ctx.chat.id, flow, outboundPort.executionContext);
+        }
+      });
+    } finally {
+      await ctx.answerCallbackQuery().catch(() => undefined);
+    }
   });
 
   async function processInboundUserMessage(
