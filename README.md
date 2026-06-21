@@ -110,7 +110,7 @@ SMTP_PASS=...
 SMTP_FROM=asce <hello@asce.tech>
 ```
 
-Имена `${{MinIO.*}}` зависят от имени сервиса MinIO в Railway. Бакет (`S3_BUCKET`) создайте вручную в MinIO Console. MinIO совместим с S3-драйвером (`S3_ENDPOINT` + `forcePathStyle`).
+Имена `${{MinIO.*}}` зависят от имени сервиса MinIO в Railway. Бакет из `S3_BUCKET` создаётся автоматически при первом обращении к хранилищу (нужны права на `CreateBucket` у `AWS_ACCESS_KEY_ID`). MinIO совместим с S3-драйвером (`S3_ENDPOINT` + `forcePathStyle`).
 
 С кастомным доменом (`asce.tech`) задайте `APP_URL` и `AUTH_URL` явно — это важно для Telegram webhook и ссылок в письмах.
 
