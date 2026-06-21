@@ -49,10 +49,85 @@ pnpm dev               # Next.js + bot-worker (polling в dev)
 - `CRON_SECRET` — Bearer-токен для эндпоинта обработки отложенных задач (обязателен в production).
 - `AUTH_SECRET` — секрет сессий Auth.js (обязателен в production).
 - `AUTH_URL` — публичный URL приложения для Auth.js (обычно совпадает с `APP_URL`).
+- `SECRETS_ENC_KEY` — шифрование `botToken` и секретов проекта at-rest (обязателен в production).
+- `REDIS_URL` — сессии бота и rate limiting (в dev без Redis — in-memory fallback).
+- `S3_*` / `AWS_*` — S3-совместимое хранилище (MinIO, AWS S3) при `MEDIA_STORAGE_DRIVER=s3`.
+- `SMTP_*` — вход по коду на email (без SMTP работает только пароль).
+- `YOOKASSA_*` — оплата подписки на платформу (опционально).
 
 ## Production
 
-### 1. База данных
+### Railway
+
+Конфиг деплоя — `railway.toml`. **Миграции не запускайте в build**: build-контейнер не видит `postgres.railway.internal`. Prisma применяется в `preDeployCommand` при деплое.
+
+| Этап | Команда |
+|------|---------|
+| Build | `pnpm build` |
+| Pre-deploy | `pnpm db:migrate:deploy` |
+| Start | `pnpm start` |
+
+Если в Railway Dashboard задан свой **Build Command** со старым `db:migrate:deploy` — удалите его или оставьте только `pnpm build`, иначе UI перебьёт `railway.toml`.
+
+**Сервисы в проекте:**
+
+1. **Web** — это приложение (подключить репозиторий).
+2. **PostgreSQL** — `DATABASE_URL=${{Postgres.DATABASE_URL}}` (internal URL, не PUBLIC).
+3. **Redis** — `REDIS_URL=${{Redis.REDIS_URL}}`.
+4. **MinIO** (или любой S3) — медиа-вложения ботов. Локальный диск (`MEDIA_STORAGE_DRIVER=local`) на Railway эфемерен: файлы пропадут при редеплое.
+
+**Пример переменных (web-сервис):**
+
+```env
+NODE_ENV=production
+APP_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}
+AUTH_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}
+
+DATABASE_URL=${{Postgres.DATABASE_URL}}
+REDIS_URL=${{Redis.REDIS_URL}}
+
+AUTH_SECRET=...          # openssl rand -base64 32
+SECRETS_ENC_KEY=...      # openssl rand -base64 32
+CRON_SECRET=...          # openssl rand -base64 32
+
+AI_API_KEY=...
+AI_BASE_URL=https://chat.immers.cloud/v1/endpoints/qwen3-coder-next-tensor/generate
+AI_MODEL=Qwen3-Coder-Next
+AI_MAX_CONCURRENCY=24
+MAX_BETA_USERS=100
+
+MEDIA_STORAGE_DRIVER=s3
+S3_BUCKET=asce-media
+S3_REGION=us-east-1
+S3_ENDPOINT=http://${{MinIO.RAILWAY_PRIVATE_DOMAIN}}:9000
+AWS_ACCESS_KEY_ID=${{MinIO.MINIO_ROOT_USER}}
+AWS_SECRET_ACCESS_KEY=${{MinIO.MINIO_ROOT_PASSWORD}}
+
+SMTP_HOST=mail.hosting.reg.ru
+SMTP_PORT=465
+SMTP_USER=hello@asce.tech
+SMTP_PASS=...
+SMTP_FROM=asce <hello@asce.tech>
+```
+
+Имена `${{MinIO.*}}` зависят от имени сервиса MinIO в Railway. Бакет (`S3_BUCKET`) создайте вручную в MinIO Console. MinIO совместим с S3-драйвером (`S3_ENDPOINT` + `forcePathStyle`).
+
+С кастомным доменом (`asce.tech`) задайте `APP_URL` и `AUTH_URL` явно — это важно для Telegram webhook и ссылок в письмах.
+
+**Cron** (напоминания, отложенные задачи ботов) — раз в минуту:
+
+```http
+GET https://<APP_URL>/api/cron/process-jobs
+Authorization: Bearer <CRON_SECRET>
+```
+
+В Railway: Cron Job или внешний планировщик.
+
+**Health check:** `GET /api/health` → `{ "status": "ok" }`.
+
+### Самостоятельный хостинг
+
+#### 1. База данных
 
 ```bash
 pnpm db:migrate:deploy   # prisma migrate deploy + generate
@@ -60,18 +135,16 @@ pnpm db:migrate:deploy   # prisma migrate deploy + generate
 
 На чистой Postgres-базе применяется baseline-миграция `20260618120000_init_postgres_baseline`.
 
-### 2. Сборка и веб-процесс
+#### 2. Сборка и веб-процесс
 
 ```bash
 pnpm build
 pnpm start               # Next.js на порту 3000
 ```
 
-На Railway миграции выполняются в `preDeployCommand` (`railway.toml`), не во время build.
+Обязательные переменные: `DATABASE_URL`, `APP_URL`, `AUTH_SECRET`, `SECRETS_ENC_KEY`, `AI_API_KEY`, `CRON_SECRET`, `NODE_ENV=production`. Для медиа в prod — `MEDIA_STORAGE_DRIVER=s3` и S3/MinIO-переменные (см. `.env.example`).
 
-Переменные: `DATABASE_URL`, `APP_URL`, `AI_API_KEY`, `CRON_SECRET`, `NODE_ENV=production`.
-
-### 3. Bot-worker (polling / отложенные задачи)
+#### 3. Bot-worker (polling / отложенные задачи)
 
 В production боты работают через **webhook** (Next.js API). Отдельный воркер нужен для:
 
@@ -100,7 +173,7 @@ WantedBy=multi-user.target
 
 Альтернатива — внешний cron, вызывающий `GET /api/cron/process-jobs` с заголовком `Authorization: Bearer $CRON_SECRET`.
 
-### 4. Health check
+#### 4. Health check
 
 `GET /api/health` → `{ "status": "ok" }`.
 
@@ -123,4 +196,5 @@ WantedBy=multi-user.target
 - `src/lib/flow` — схема нод, нормализация, раскладка, валидация.
 - `src/lib/bot` — рантайм бота: исполнение схемы, сессии, отложенные задачи.
 - `prisma` — схема БД и миграции.
+- `railway.toml` — команды build / pre-deploy / start для Railway.
 - `scripts/bot-worker.ts` — фоновый воркер (polling sync + job processor).
