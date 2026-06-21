@@ -23,7 +23,7 @@ export function isDeliveryMode(value: string): value is DeliveryMode {
  * BOT_DELIVERY_MODE переопределяет всё (в т.ч. production).
  * Иначе: dev → polling, prod → webhook (или polling из БД проекта).
  */
-export function resolveDeliveryMode(projectDeliveryMode?: DeliveryMode): DeliveryMode {
+export function resolveDeliveryMode(projectDeliveryMode?: string): DeliveryMode {
   const forced = process.env.BOT_DELIVERY_MODE?.trim();
   if (forced && isDeliveryMode(forced)) {
     return forced;
