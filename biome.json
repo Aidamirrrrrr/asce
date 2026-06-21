@@ -1,0 +1,146 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.2.0/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": ["**", "!node_modules", "!.next", "!dist", "!build", "!src/generated"]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100,
+    "lineEnding": "lf"
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always",
+      "trailingCommas": "all",
+      "arrowParentheses": "always"
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "a11y": {
+        "recommended": true,
+        "noAutofocus": "error",
+        "noSvgWithoutTitle": "warn",
+        "noLabelWithoutControl": {
+          "level": "error",
+          "options": { "inputComponents": ["Checkbox"] }
+        },
+        "useButtonType": "error",
+        "useKeyWithClickEvents": "warn"
+      },
+      "complexity": {
+        "recommended": true,
+        "noImportantStyles": "error",
+        "noUselessFragments": "error",
+        "useOptionalChain": "error",
+        "useSimplifiedLogicExpression": "warn"
+      },
+      "correctness": {
+        "recommended": true,
+        "noUnusedImports": "error",
+        "noUnusedVariables": "error",
+        "useExhaustiveDependencies": "warn",
+        "useHookAtTopLevel": "error"
+      },
+      "performance": {
+        "recommended": true,
+        "noAccumulatingSpread": "warn"
+      },
+      "security": {
+        "recommended": true
+      },
+      "style": {
+        "recommended": true,
+        "noDefaultExport": "off",
+        "noNonNullAssertion": "error",
+        "useBlockStatements": "error",
+        "useConsistentArrayType": {
+          "level": "error",
+          "options": { "syntax": "shorthand" }
+        },
+        "useConst": "error",
+        "useImportType": "error",
+        "useNodejsImportProtocol": "error",
+        "useSelfClosingElements": "error",
+        "useTemplate": "warn"
+      },
+      "suspicious": {
+        "recommended": true,
+        "noConsole": "warn",
+        "noExplicitAny": "error",
+        "noUnknownAtRules": "off",
+        "noArrayIndexKey": "warn",
+        "noDoubleEquals": "error"
+      }
+    },
+    "domains": {
+      "next": "recommended",
+      "react": "recommended"
+    }
+  },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["src/app/globals.css"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noImportantStyles": "off"
+          },
+          "correctness": {
+            "noUnknownTypeSelector": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/components/ui/**"],
+      "linter": {
+        "enabled": false
+      }
+    },
+    {
+      "includes": [
+        "src/lib/bot/**",
+        "src/lib/ai/**",
+        "src/lib/analytics/**",
+        "src/app/api/**",
+        "scripts/**"
+      ],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/lib/flow/**", "src/lib/ai/**", "src/lib/chat/**", "**/*.test.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noNonNullAssertion": "off"
+          }
+        }
+      }
+    }
+  ]
+}

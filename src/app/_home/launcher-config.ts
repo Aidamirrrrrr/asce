@@ -1,0 +1,1 @@
+export const LAUNCHER_PROJECTS_PREVIEW_COUNT = 3;
