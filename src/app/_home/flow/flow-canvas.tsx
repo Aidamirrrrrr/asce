@@ -197,19 +197,19 @@ function FlowEditorInner({
 
   const displayEdges = useMemo(
     () =>
-      edges.map((edge, index) => ({
-        ...withFlowBusEdgeType(edge),
-        // Рёбра-«назад» не прячем, а рисуем пунктиром — связь видна, но не спагетти.
-        style: {
-          ...edge.style,
-          strokeDasharray: backNavigation.backEdgeIds.has(edge.id) ? "7 6" : undefined,
-          opacity: isFlowGenerating || revealed ? 1 : 0,
-          transition:
-            !isFlowGenerating && revealed
-              ? `opacity ${duration.slow}s ease ${0.12 + index * 0.05}s`
-              : undefined,
-        },
-      })),
+      edges
+        .filter((edge) => !backNavigation.backEdgeIds.has(edge.id))
+        .map((edge, index) => ({
+          ...withFlowBusEdgeType(edge),
+          style: {
+            ...edge.style,
+            opacity: isFlowGenerating || revealed ? 1 : 0,
+            transition:
+              !isFlowGenerating && revealed
+                ? `opacity ${duration.slow}s ease ${0.12 + index * 0.05}s`
+                : undefined,
+          },
+        })),
     [edges, revealed, isFlowGenerating, backNavigation],
   );
 

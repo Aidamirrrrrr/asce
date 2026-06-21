@@ -13,7 +13,6 @@ export function AiReplyNode(props: NodeProps) {
       {...props}
       icon={SparklesIcon}
       preview={data.systemPrompt || "Без system prompt"}
-      hasSource={false}
     />
   );
 }

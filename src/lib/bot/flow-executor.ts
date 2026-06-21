@@ -447,7 +447,7 @@ async function walkFromNode(
     return outboundToWalkResult(sendResult);
   }
 
-  if (isSetVariableNode(node)) {
+  if (isSetVariableNode(node) || isAiReplyNode(node)) {
     const nextEdges = getOutgoingEdges(flow, nodeId, "next");
     for (const edge of nextEdges) {
       const paused = await walkFromNode(flow, edge.target, userMessage, port, visited);
