@@ -1,4 +1,4 @@
-import { generateAiReply } from "@/lib/ai/ai-client";
+import { generateAiReply, streamGenerateAiReply } from "@/lib/ai/ai-client";
 import { type ComposerIntent, classifyComposerIntent } from "@/lib/ai/composer-intent";
 import type { FlowStreamCallbacks } from "@/lib/ai/flow-generator";
 import { generateFlowFromPrompt, refineFlowFromInstruction } from "@/lib/ai/flow-generator";
@@ -27,7 +27,11 @@ type ResolveComposerTurnInput = {
   userMessage: string;
   chatHistory: ProjectChatMessage[];
   currentFlow: BotFlowDocument;
-  callbacks?: FlowStreamCallbacks;
+  callbacks?: FlowStreamCallbacks & {
+    onAssistantDelta?: (delta: string) => void;
+    onAssistantReset?: () => void;
+    onToolStatus?: (message: string) => void;
+  };
   /** Не добавлять сообщение пользователя в историю (кнопка «Продолжить»). */
   recordUserMessage?: boolean;
   /** Пропустить классификацию (продолжение агента сценария). */
@@ -80,6 +84,7 @@ function buildTurnMessages(
     recordUserMessage: boolean;
     assistantMeta?: ProjectChatMessageMeta;
     buildPlan?: ChatBuildPlanState | null;
+    flowSnapshot?: BotFlowDocument;
   },
 ): ProjectChatMessage[] {
   const clearedHistory = chatHistory.map(clearStepLimitMeta);
@@ -93,7 +98,12 @@ function buildTurnMessages(
     messages.push(createBuildPlanChatMessage(options.buildPlan));
   }
 
-  messages.push(createChatMessage("assistant", assistantContent, undefined, options.assistantMeta));
+  messages.push(
+    createChatMessage("assistant", assistantContent, undefined, {
+      ...options.assistantMeta,
+      ...(options.flowSnapshot ? { flowSnapshot: options.flowSnapshot } : {}),
+    }),
+  );
 
   return messages;
 }
@@ -103,12 +113,18 @@ export async function resolveDataComposerTurn(input: {
   userMessage: string;
   chatHistory: ProjectChatMessage[];
   recordUserMessage?: boolean;
+  callbacks?: {
+    onAssistantDelta?: (delta: string) => void;
+    onAssistantReset?: () => void;
+    onToolStatus?: (message: string) => void;
+  };
 }): Promise<Extract<ComposerTurnResult, { kind: "data" }>> {
-  const { projectId, userMessage, chatHistory, recordUserMessage = true } = input;
+  const { projectId, userMessage, chatHistory, recordUserMessage = true, callbacks } = input;
   const { answer, actionCard } = await answerProjectDataQuestion(
     projectId,
     userMessage,
     chatHistory,
+    callbacks,
   );
 
   const assistantMeta = actionCard ? { actionCard } : undefined;
@@ -132,8 +148,11 @@ async function resolveChatComposerTurn(input: {
   userMessage: string;
   chatHistory: ProjectChatMessage[];
   recordUserMessage?: boolean;
+  callbacks?: {
+    onAssistantDelta?: (delta: string) => void;
+  };
 }): Promise<Extract<ComposerTurnResult, { kind: "data" }>> {
-  const { userMessage, chatHistory, recordUserMessage = true } = input;
+  const { userMessage, chatHistory, recordUserMessage = true, callbacks } = input;
   const context = chatHistory
     .slice(-4)
     .map(
@@ -144,7 +163,9 @@ async function resolveChatComposerTurn(input: {
     ? `${CHAT_SYSTEM_PROMPT}\n\nКонтекст:\n${context}`
     : CHAT_SYSTEM_PROMPT;
 
-  const answer = await generateAiReply(systemPrompt, userMessage);
+  const answer = callbacks?.onAssistantDelta
+    ? await streamGenerateAiReply(systemPrompt, userMessage, callbacks.onAssistantDelta)
+    : await generateAiReply(systemPrompt, userMessage);
 
   return {
     kind: "data",
@@ -189,6 +210,7 @@ async function resolveFlowComposerTurn(
       recordUserMessage,
       assistantMeta,
       buildPlan: getCollectedBuildPlan(),
+      flowSnapshot: flow,
     }),
     flow,
     validationSummary: withValidation.validationSummary,
@@ -210,6 +232,7 @@ export async function resolveComposerTurn(
       userMessage,
       chatHistory,
       recordUserMessage: input.recordUserMessage,
+      callbacks: input.callbacks,
     });
   }
 
@@ -218,6 +241,7 @@ export async function resolveComposerTurn(
       userMessage,
       chatHistory,
       recordUserMessage: input.recordUserMessage,
+      callbacks: input.callbacks,
     });
   }
 
@@ -245,7 +269,12 @@ export async function resolveCreateComposerTurn(input: {
     messages.push(createBuildPlanChatMessage(buildPlan));
   }
 
-  messages.push(createChatMessage("assistant", withValidation.message, undefined, assistantMeta));
+  messages.push(
+    createChatMessage("assistant", withValidation.message, undefined, {
+      ...assistantMeta,
+      flowSnapshot: flow,
+    }),
+  );
 
   return {
     kind: "flow",

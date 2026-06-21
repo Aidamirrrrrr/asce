@@ -46,6 +46,8 @@ type PromptComposerProps = {
   onStreamPlanProgress?: (done: number[]) => void;
   onStreamProgress?: (nodeCount: number) => void;
   onStreamStatus?: (message: string) => void;
+  onStreamAssistantDelta?: (delta: string) => void;
+  onStreamAssistantReset?: () => void;
 };
 
 export type PromptComposerHandle = {
@@ -85,6 +87,8 @@ export const PromptComposer = forwardRef<PromptComposerHandle, PromptComposerPro
       onStreamPlanProgress,
       onStreamProgress,
       onStreamStatus,
+      onStreamAssistantDelta,
+      onStreamAssistantReset,
     },
     ref,
   ) {
@@ -146,6 +150,8 @@ export const PromptComposer = forwardRef<PromptComposerHandle, PromptComposerPro
             },
             onPlan: (items) => onStreamPlan?.(items),
             onPlanProgress: (done) => onStreamPlanProgress?.(done),
+            onAssistantDelta: (delta) => onStreamAssistantDelta?.(delta),
+            onAssistantReset: () => onStreamAssistantReset?.(),
             onComplete: (event) => {
               setPrompt("");
               onRefined?.({

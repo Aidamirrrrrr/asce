@@ -4,7 +4,7 @@ import type {
   ChatCompletionTool,
 } from "openai/resources/chat/completions";
 
-import { getAiClient, getAiModel, meterChatUsage } from "@/lib/ai/ai-client";
+import { createStreamingChatCompletion, getAiClient, getAiModel, meterChatUsage } from "@/lib/ai/ai-client";
 import {
   activeUsers,
   countUsers,
@@ -330,6 +330,33 @@ export type AnalyticsAnswer = {
   actionCard?: ChatActionCard;
 };
 
+export type QaAgentCallbacks = {
+  onToolStatus?: (message: string) => void;
+  onAssistantDelta?: (delta: string) => void;
+  onAssistantReset?: () => void;
+};
+
+function toolStatusLabel(name: string): string {
+  const labels: Record<string, string> = {
+    describe_project_data: "Смотрю схему данных…",
+    query_project_data: "Запрашиваю данные…",
+    count_users: "Считаю пользователей…",
+    active_users: "Считаю активных пользователей…",
+    new_users: "Считаю новых пользователей…",
+    messages_count: "Считаю сообщения…",
+    events_by_type: "Смотрю события…",
+    top_commands: "Смотрю команды…",
+    funnel_by_node: "Смотрю воронку…",
+    errors_stats: "Смотрю ошибки…",
+    list_record_collections: "Смотрю заявки…",
+    count_records: "Считаю заявки…",
+    list_recent_records: "Загружаю заявки…",
+    present_action_card: "Готовлю подтверждение…",
+  };
+
+  return labels[name] ?? "Ищу данные…";
+}
+
 async function runTool(
   projectId: string,
   name: string,
@@ -376,8 +403,8 @@ export async function answerProjectDataQuestion(
   projectId: string,
   question: string,
   chatHistory: ProjectChatMessage[] = [],
+  callbacks?: QaAgentCallbacks,
 ): Promise<AnalyticsAnswer> {
-  const client = getAiClient();
   const model = getAiModel();
 
   const messages: ChatCompletionMessageParam[] = [
@@ -390,25 +417,27 @@ export async function answerProjectDataQuestion(
 
   try {
     for (let step = 0; step < 10; step += 1) {
-      const response = await client.chat.completions.create({
-        model,
-        messages,
-        tools: TOOLS,
-        tool_choice: "auto",
-      });
-      meterChatUsage(response);
+      let streamedContent = false;
+      const { content, toolCalls } = await createStreamingChatCompletion(
+        {
+          model,
+          messages,
+          tools: TOOLS,
+          tool_choice: "auto",
+        },
+        {
+          onContentDelta: (delta) => {
+            streamedContent = true;
+            callbacks?.onAssistantDelta?.(delta);
+          },
+        },
+      );
 
-      const message = response.choices[0]?.message;
-      if (!message) {
-        break;
-      }
-
-      const toolCalls = message.tool_calls ?? [];
       if (toolCalls.length === 0) {
-        const answer = typeof message.content === "string" ? message.content : "";
-        if (answer.trim()) {
+        const answer = content.trim();
+        if (answer) {
           return {
-            answer: stripTextEmojis(answer.trim()),
+            answer: stripTextEmojis(answer),
             toolCalls: trace,
             actionCard: pendingActionCard,
           };
@@ -416,9 +445,13 @@ export async function answerProjectDataQuestion(
         break;
       }
 
+      if (streamedContent) {
+        callbacks?.onAssistantReset?.();
+      }
+
       messages.push({
         role: "assistant",
-        content: message.content ?? "",
+        content,
         tool_calls: toolCalls,
       });
 
@@ -426,6 +459,7 @@ export async function answerProjectDataQuestion(
         if (call.type !== "function") {
           continue;
         }
+        callbacks?.onToolStatus?.(toolStatusLabel(call.function.name));
         const args = parseToolArguments(call.function.arguments);
         const { result } = await runTool(projectId, call.function.name, args);
         trace.push({ name: call.function.name, arguments: args, result });
@@ -449,11 +483,11 @@ export async function answerProjectDataQuestion(
     }
 
     // Цикл завершился без финального текста — формируем ответ из собранных данных.
-    return answerFromSnapshot(projectId, question, trace, chatHistory);
+    return answerFromSnapshot(projectId, question, trace, chatHistory, callbacks);
   } catch (error) {
     if (error instanceof OpenAI.APIError) {
       // Вероятно, tools не поддержаны — fallback на снимок.
-      return answerFromSnapshot(projectId, question, trace, chatHistory);
+      return answerFromSnapshot(projectId, question, trace, chatHistory, callbacks);
     }
     throw error;
   }
@@ -473,6 +507,7 @@ async function answerFromSnapshot(
   question: string,
   trace: AnalyticsToolCallTrace[],
   chatHistory: ProjectChatMessage[] = [],
+  callbacks?: QaAgentCallbacks,
 ): Promise<AnalyticsAnswer> {
   const [users, active7, new7, messages7, byType, commands, errors, collections, recordsCount] =
     await Promise.all([
@@ -501,23 +536,45 @@ async function answerFromSnapshot(
 
   const client = getAiClient();
   const model = getAiModel();
-  const response = await client.chat.completions.create({
-    model,
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      ...buildHistoryMessages(chatHistory),
-      {
-        role: "user",
-        content: `Данные бота (JSON):\n${JSON.stringify(snapshot, null, 2)}\n\nВопрос: ${question}\n\nОтветь, опираясь только на эти данные.`,
-      },
-    ],
-  });
-  meterChatUsage(response);
+  const snapshotPrompt = `Данные бота (JSON):\n${JSON.stringify(snapshot, null, 2)}\n\nВопрос: ${question}\n\nОтветь, опираясь только на эти данные.`;
 
-  const content = response.choices[0]?.message?.content;
-  const answer = typeof content === "string" ? content : "";
+  const answer = callbacks?.onAssistantDelta
+    ? stripTextEmojis(
+        (
+          await createStreamingChatCompletion(
+            {
+              model,
+              messages: [
+                { role: "system", content: SYSTEM_PROMPT },
+                ...buildHistoryMessages(chatHistory),
+                { role: "user", content: snapshotPrompt },
+              ],
+            },
+            { onContentDelta: callbacks.onAssistantDelta },
+          )
+        ).content.trim(),
+      )
+    : stripTextEmojis(
+        extractSnapshotAnswer(
+          await client.chat.completions.create({
+            model,
+            messages: [
+              { role: "system", content: SYSTEM_PROMPT },
+              ...buildHistoryMessages(chatHistory),
+              { role: "user", content: snapshotPrompt },
+            ],
+          }),
+        ),
+      );
+
   return {
-    answer: stripTextEmojis(answer.trim() || "Не удалось сформировать ответ по доступным данным."),
+    answer: answer || "Не удалось сформировать ответ по доступным данным.",
     toolCalls: trace,
   };
+}
+
+function extractSnapshotAnswer(response: OpenAI.Chat.Completions.ChatCompletion): string {
+  meterChatUsage(response);
+  const content = response.choices[0]?.message?.content;
+  return typeof content === "string" ? content.trim() : "";
 }

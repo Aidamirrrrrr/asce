@@ -1,15 +1,36 @@
 "use client";
 
-import { BotIcon, CheckIcon, Loader2Icon, MessageSquarePlusIcon, UserIcon } from "lucide-react";
+import {
+  BotIcon,
+  CheckIcon,
+  CopyIcon,
+  HistoryIcon,
+  Loader2Icon,
+  MessageSquarePlusIcon,
+  UserIcon,
+} from "lucide-react";
 import { m } from "motion/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 
 import { ChatActionCardPanel } from "@/app/_home/chat-action-card";
 import { ChatMarkdown } from "@/app/_home/chat-markdown";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { buildStepLimitNotice } from "@/lib/ai/flow-agent-continue";
+import { canRollbackToMessage } from "@/lib/chat/chat-rollback";
 import type { ChatBuildPlanState } from "@/lib/chat/build-plan-message";
 import { duration, gentleEase } from "@/lib/motion";
 import type { ProjectChatMessage, ProjectSummary } from "@/lib/projects";
@@ -100,6 +121,8 @@ type ProjectChatPanelProps = {
   onContinueAgent?: () => void;
   isContinueDisabled?: boolean;
   onActionCard?: (messageId: string, actionId: string) => void;
+  onRollback?: (messageId: string) => Promise<void>;
+  isRollbackDisabled?: boolean;
 };
 
 function StepLimitBanner({
@@ -129,8 +152,124 @@ function isActiveStepLimitMessage(
 
   const lastAssistant = [...messages]
     .reverse()
-    .find((item) => item.role === "assistant" && !item.meta?.buildPlan);
+    .find((item) => item.role === "assistant" && !item.meta?.buildPlan && !item.meta?.streaming);
   return lastAssistant?.id === message.id;
+}
+
+function ChatMessageActions({
+  message,
+  messages,
+  isUser,
+  onRollback,
+  isRollbackDisabled,
+}: {
+  message: ProjectChatMessage;
+  messages: ProjectChatMessage[];
+  isUser: boolean;
+  onRollback?: (messageId: string) => Promise<void>;
+  isRollbackDisabled?: boolean;
+}) {
+  const [rollbackOpen, setRollbackOpen] = useState(false);
+  const [isRollingBack, setIsRollingBack] = useState(false);
+  const canCopy = message.content.trim().length > 0;
+  const canRollback = Boolean(onRollback) && canRollbackToMessage(messages, message.id);
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(message.content);
+      toast.success("Сообщение скопировано");
+    } catch {
+      toast.error("Не удалось скопировать");
+    }
+  }
+
+  async function handleRollback() {
+    if (!onRollback) {
+      return;
+    }
+
+    setIsRollingBack(true);
+    try {
+      await onRollback(message.id);
+      setRollbackOpen(false);
+      toast.success("Чат и сценарий откачены");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Не удалось откатить");
+    } finally {
+      setIsRollingBack(false);
+    }
+  }
+
+  if (!canCopy && !canRollback) {
+    return null;
+  }
+
+  return (
+    <>
+      <div
+        className={cn(
+          "absolute top-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover/message:opacity-100",
+          isUser ? "-left-1 -translate-x-full" : "-right-1 translate-x-full",
+        )}
+      >
+        <TooltipProvider delayDuration={300}>
+          {canCopy ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="size-7 bg-background/90 shadow-sm"
+                  onClick={() => void handleCopy()}
+                >
+                  <CopyIcon className="size-3.5" />
+                  <span className="sr-only">Копировать</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Копировать</TooltipContent>
+            </Tooltip>
+          ) : null}
+          {canRollback ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="size-7 bg-background/90 shadow-sm"
+                  disabled={isRollbackDisabled || isRollingBack}
+                  onClick={() => setRollbackOpen(true)}
+                >
+                  <HistoryIcon className="size-3.5" />
+                  <span className="sr-only">Откатить к сообщению</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Откатить чат и сценарий</TooltipContent>
+            </Tooltip>
+          ) : null}
+        </TooltipProvider>
+      </div>
+
+      <AlertDialog open={rollbackOpen} onOpenChange={setRollbackOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Откатить к этому сообщению?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Все сообщения после этого будут удалены, а сценарий на холсте вернётся к состоянию на
+              этот момент. Это действие нельзя отменить.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isRollingBack}>Отмена</AlertDialogCancel>
+            <AlertDialogAction disabled={isRollingBack} onClick={() => void handleRollback()}>
+              {isRollingBack ? "Откатываем…" : "Откатить"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
 }
 
 function ChatMessageRow({
@@ -139,17 +278,23 @@ function ChatMessageRow({
   onContinueAgent,
   isContinueDisabled,
   onActionCard,
+  onRollback,
+  isRollbackDisabled,
 }: {
   message: ProjectChatMessage;
   messages: ProjectChatMessage[];
   onContinueAgent?: () => void;
   isContinueDisabled?: boolean;
   onActionCard?: (messageId: string, actionId: string) => void;
+  onRollback?: (messageId: string) => Promise<void>;
+  isRollbackDisabled?: boolean;
 }) {
   const isUser = message.role === "user";
   const showStepLimit = isActiveStepLimitMessage(messages, message);
   const actionCard = message.meta?.actionCard;
   const buildPlan = message.meta?.buildPlan;
+  const isStreaming = message.meta?.streaming === true;
+  const showActions = !buildPlan && !isStreaming;
 
   return (
     <m.div
@@ -174,10 +319,10 @@ function ChatMessageRow({
           {isUser ? <UserIcon className="size-3.5" /> : <BotIcon className="size-3.5" />}
         </AvatarFallback>
       </Avatar>
-      <div className="min-w-0 max-w-[85%] space-y-2">
+      <div className="group/message relative min-w-0 max-w-[85%] space-y-2">
         <div
           className={cn(
-            "px-3.5 py-2.5 text-sm leading-relaxed shadow-sm",
+            "relative px-3.5 py-2.5 text-sm leading-relaxed shadow-sm",
             isUser
               ? "rounded-2xl rounded-br-md bg-primary text-primary-foreground"
               : "rounded-2xl rounded-bl-md border border-border/60 bg-muted/60 text-foreground",
@@ -187,10 +332,29 @@ function ChatMessageRow({
             <p className="whitespace-pre-wrap">{message.content}</p>
           ) : buildPlan ? (
             <BuildPlanChecklist plan={buildPlan} />
+          ) : isStreaming && !message.content.trim() ? (
+            <ThinkingDots label="Думаю" />
           ) : (
-            <ChatMarkdown content={message.content} />
+            <>
+              <ChatMarkdown content={message.content} />
+              {isStreaming ? (
+                <span
+                  className="ml-0.5 inline-block h-4 w-1.5 animate-pulse rounded-sm bg-primary/70 align-middle"
+                  aria-hidden
+                />
+              ) : null}
+            </>
           )}
         </div>
+        {showActions ? (
+          <ChatMessageActions
+            message={message}
+            messages={messages}
+            isUser={isUser}
+            onRollback={onRollback}
+            isRollbackDisabled={isRollbackDisabled}
+          />
+        ) : null}
         {showStepLimit ? (
           <StepLimitBanner onContinue={onContinueAgent} disabled={isContinueDisabled} />
         ) : null}
@@ -231,6 +395,8 @@ export function ProjectChatPanel({
   onContinueAgent,
   isContinueDisabled = false,
   onActionCard,
+  onRollback,
+  isRollbackDisabled = false,
 }: ProjectChatPanelProps) {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
@@ -271,6 +437,8 @@ export function ProjectChatPanel({
                   onContinueAgent={onContinueAgent}
                   isContinueDisabled={isContinueDisabled}
                   onActionCard={onActionCard}
+                  onRollback={onRollback}
+                  isRollbackDisabled={isRollbackDisabled}
                 />
               ))
             )}

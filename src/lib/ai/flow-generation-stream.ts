@@ -9,6 +9,8 @@ export type FlowGenerationStreamEvent =
   | { type: "plan"; items: string[] }
   | { type: "plan_progress"; done: number[] }
   | { type: "flow"; flow: BotFlowDocument; nodeCount: number }
+  | { type: "assistant_delta"; delta: string }
+  | { type: "assistant_reset" }
   | {
       type: "complete";
       project: ProjectSummary;
@@ -42,6 +44,8 @@ export async function consumeFlowGenerationStream(
     onPlan?: (items: string[]) => void;
     onPlanProgress?: (done: number[]) => void;
     onFlow?: (flow: BotFlowDocument, nodeCount: number) => void;
+    onAssistantDelta?: (delta: string) => void;
+    onAssistantReset?: () => void;
     onComplete?: (event: Extract<FlowGenerationStreamEvent, { type: "complete" }>) => void;
     onError?: (message: string) => void;
   },
@@ -122,6 +126,12 @@ export async function consumeFlowGenerationStream(
             break;
           case "flow":
             handlers.onFlow?.(payload.flow, payload.nodeCount);
+            break;
+          case "assistant_delta":
+            handlers.onAssistantDelta?.(payload.delta);
+            break;
+          case "assistant_reset":
+            handlers.onAssistantReset?.();
             break;
           case "complete":
             handlers.onComplete?.(payload);

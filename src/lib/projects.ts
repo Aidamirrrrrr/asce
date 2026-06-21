@@ -4,6 +4,9 @@ import { buildWebhookUrl } from "@/lib/bot/config";
 import { decryptBotTokenFromStorage } from "@/lib/bot/project-token";
 
 import type { ChatBuildPlanState } from "@/lib/chat/build-plan-message";
+import type { BotFlowDocument } from "@/lib/flow/flow-schema";
+import { parseFlowJson } from "@/lib/flow/flow-schema";
+import { createEmptyFlow } from "@/lib/flow/default-flow";
 
 export type DeliveryMode = "webhook" | "polling";
 export type RuntimeStatus = "stopped" | "running" | "error";
@@ -37,6 +40,10 @@ export type ProjectChatMessageMeta = {
   stepLimitReached?: boolean;
   actionCard?: ChatActionCard;
   buildPlan?: ChatBuildPlanState;
+  /** Клиентский флаг: ответ ассистента ещё дописывается по токенам. */
+  streaming?: boolean;
+  /** Снимок сценария после этого хода (для отката чата). */
+  flowSnapshot?: BotFlowDocument;
 };
 
 export type ProjectChatMessage = {
@@ -82,6 +89,10 @@ function parseChatMessageMeta(meta: unknown): ProjectChatMessageMeta | undefined
 
   if (raw.stepLimitReached === true) {
     parsed.stepLimitReached = true;
+  }
+
+  if (raw.streaming === true) {
+    parsed.streaming = true;
   }
 
   if (raw.actionCard && typeof raw.actionCard === "object") {
@@ -149,6 +160,10 @@ function parseChatMessageMeta(meta: unknown): ProjectChatMessageMeta | undefined
         ...(typeof plan.statusLabel === "string" ? { statusLabel: plan.statusLabel } : {}),
       };
     }
+  }
+
+  if (raw.flowSnapshot && typeof raw.flowSnapshot === "object") {
+    parsed.flowSnapshot = parseFlowJson(JSON.stringify(raw.flowSnapshot), createEmptyFlow());
   }
 
   return Object.keys(parsed).length > 0 ? parsed : undefined;

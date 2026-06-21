@@ -126,7 +126,17 @@ export async function POST(request: Request, context: RouteContext) {
                             send({ type: "plan_progress", done });
                           },
                         }
-                      : undefined,
+                      : {
+                          onAssistantDelta: (delta) => {
+                            send({ type: "assistant_delta", delta });
+                          },
+                          onAssistantReset: () => {
+                            send({ type: "assistant_reset" });
+                          },
+                          onToolStatus: (message) => {
+                            send({ type: "status", message });
+                          },
+                        },
                 }),
             );
           },

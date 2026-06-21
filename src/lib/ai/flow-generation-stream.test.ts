@@ -86,6 +86,22 @@ describe("consumeFlowGenerationStream", () => {
     expect(onPlanProgress).toHaveBeenCalledWith([0, 1]);
   });
 
+  it("dispatches assistant_delta and assistant_reset handlers", async () => {
+    const onAssistantDelta = vi.fn();
+    const onAssistantReset = vi.fn();
+
+    await consumeFlowGenerationStream(
+      sseResponse([
+        { type: "assistant_delta", delta: "Привет" },
+        { type: "assistant_reset" },
+      ]),
+      { onAssistantDelta, onAssistantReset },
+    );
+
+    expect(onAssistantDelta).toHaveBeenCalledWith("Привет");
+    expect(onAssistantReset).toHaveBeenCalledTimes(1);
+  });
+
   it("throws on error events after calling onError", async () => {
     const onError = vi.fn();
 

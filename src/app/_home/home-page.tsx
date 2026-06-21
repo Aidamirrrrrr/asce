@@ -23,6 +23,11 @@ import {
   STREAMING_BUILD_PLAN_MESSAGE_ID,
   upsertStreamingBuildPlanMessage,
 } from "@/lib/chat/build-plan-message";
+import {
+  removeStreamingAssistantMessage,
+  STREAMING_ASSISTANT_MESSAGE_ID,
+  upsertStreamingAssistantMessage,
+} from "@/lib/chat/streaming-assistant-message";
 import { createStreamingSeedFlow } from "@/lib/flow/default-flow";
 import type { BotFlowDocument } from "@/lib/flow/flow-schema";
 import { duration, gentleEase } from "@/lib/motion";
@@ -78,10 +83,13 @@ function LauncherContent({
   onStreamPlanProgress,
   onStreamProgress,
   onStreamStatus,
+  onStreamAssistantDelta,
+  onStreamAssistantReset,
   isChatBusy,
   composerRef,
   onContinueAgent,
   onActionCard,
+  onChatRollback,
 }: {
   projects: ProjectSummary[];
   activeProjectId: string | null;
@@ -114,10 +122,13 @@ function LauncherContent({
   onStreamPlanProgress: (done: number[]) => void;
   onStreamProgress: (nodeCount: number) => void;
   onStreamStatus: (message: string) => void;
+  onStreamAssistantDelta: (delta: string) => void;
+  onStreamAssistantReset: () => void;
   isChatBusy: boolean;
   composerRef: RefObject<PromptComposerHandle | null>;
   onContinueAgent: () => void;
   onActionCard: (messageId: string, actionId: string) => void;
+  onChatRollback: (messageId: string) => Promise<void>;
 }) {
   const isChatLayout = layoutMode === "chat";
   const [sectionShellOpen, setSectionShellOpen] = useState(projects.length > 0);
@@ -213,6 +224,8 @@ function LauncherContent({
                   onContinueAgent={onContinueAgent}
                   isContinueDisabled={isChatBusy}
                   onActionCard={onActionCard}
+                  onRollback={onChatRollback}
+                  isRollbackDisabled={isChatBusy}
                 />
               </m.div>
             ) : null}
@@ -234,6 +247,8 @@ function LauncherContent({
             onStreamPlanProgress={onStreamPlanProgress}
             onStreamProgress={onStreamProgress}
             onStreamStatus={onStreamStatus}
+            onStreamAssistantDelta={onStreamAssistantDelta}
+            onStreamAssistantReset={onStreamAssistantReset}
             projectId={activeProjectId}
             variant={isChatLayout ? "chat" : "launcher"}
           />
@@ -469,13 +484,24 @@ export function HomePage({ initialProjects }: HomePageProps) {
   }, []);
 
   const handleStreamStatus = useCallback((message: string) => {
-    setChatMessages((current) => {
-      const hasBuildPlan = current.some((item) => item.id === STREAMING_BUILD_PLAN_MESSAGE_ID);
-      if (!hasBuildPlan) {
-        return current;
-      }
+    setChatMessages((current) =>
+      upsertStreamingBuildPlanMessage(current, { statusLabel: message }),
+    );
+  }, []);
 
-      return upsertStreamingBuildPlanMessage(current, { statusLabel: message });
+  const handleStreamAssistantDelta = useCallback((delta: string) => {
+    setChatMessages((current) => {
+      const withoutBuildPlan = current.filter(
+        (message) => message.id !== STREAMING_BUILD_PLAN_MESSAGE_ID,
+      );
+      return upsertStreamingAssistantMessage(withoutBuildPlan, { append: delta });
+    });
+  }, []);
+
+  const handleStreamAssistantReset = useCallback(() => {
+    setChatMessages((current) => {
+      const withoutAssistant = removeStreamingAssistantMessage(current);
+      return upsertStreamingBuildPlanMessage(withoutAssistant, { statusLabel: "Ищу данные…" });
     });
   }, []);
 
@@ -497,7 +523,9 @@ export function HomePage({ initialProjects }: HomePageProps) {
     setChatMessages((current) =>
       current.filter(
         (message) =>
-          message.id !== "streaming-user" && message.id !== STREAMING_BUILD_PLAN_MESSAGE_ID,
+          message.id !== "streaming-user" &&
+          message.id !== STREAMING_BUILD_PLAN_MESSAGE_ID &&
+          message.id !== STREAMING_ASSISTANT_MESSAGE_ID,
       ),
     );
   }, []);
@@ -553,8 +581,21 @@ export function HomePage({ initialProjects }: HomePageProps) {
         if (!preserveFlowDuringGenerationRef.current) {
           applyStreamingSeed();
         }
-        setChatMessages((current) => upsertStreamingBuildPlanMessage(current, {}));
+        setChatMessages((current) =>
+          removeStreamingAssistantMessage(
+            upsertStreamingBuildPlanMessage(current, { statusLabel: "Обновляем сценарий…" }),
+          ),
+        );
+        return;
       }
+
+      setChatMessages((current) =>
+        removeStreamingAssistantMessage(
+          upsertStreamingBuildPlanMessage(current, {
+            statusLabel: intent === "data" ? "Ищу данные…" : "Думаю…",
+          }),
+        ),
+      );
     },
     [applyStreamingSeed],
   );
@@ -589,11 +630,14 @@ export function HomePage({ initialProjects }: HomePageProps) {
             }
           }
 
-          if (options?.forceFlow || options?.silent) {
-            next = upsertStreamingBuildPlanMessage(next, {
-              statusLabel: options.silent ? "Продолжаем сборку…" : "Обновляем сценарий…",
-            });
-          }
+          next = removeStreamingAssistantMessage(next);
+          next = upsertStreamingBuildPlanMessage(next, {
+            statusLabel: options?.silent
+              ? "Продолжаем сборку…"
+              : options?.forceFlow
+                ? "Обновляем сценарий…"
+                : "Думаю…",
+          });
 
           return next;
         });
@@ -633,6 +677,48 @@ export function HomePage({ initialProjects }: HomePageProps) {
         }
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Не удалось выполнить действие");
+      }
+    },
+    [activeProjectId],
+  );
+
+  const handleChatRollback = useCallback(
+    async (messageId: string) => {
+      if (!activeProjectId) {
+        throw new Error("Проект не выбран");
+      }
+
+      const response = await fetch(`/api/projects/${activeProjectId}/chat-rollback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId }),
+      });
+
+      const data = (await response.json()) as {
+        project?: ProjectSummary;
+        messages?: ProjectChatMessage[];
+        flow?: BotFlowDocument;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(data.error ?? "Не удалось откатить");
+      }
+
+      if (data.project) {
+        setProjects((current) =>
+          current.map((item) => (item.id === data.project?.id ? data.project : item)),
+        );
+      }
+
+      if (data.messages) {
+        setChatMessages(data.messages);
+      }
+
+      if (data.flow) {
+        setCommittedFlowDocument(data.flow);
+        setExternalFlowDocument(null);
+        setFlowDocumentRevision((current) => current + 1);
       }
     },
     [activeProjectId],
@@ -757,10 +843,13 @@ export function HomePage({ initialProjects }: HomePageProps) {
       onStreamPlanProgress={handleStreamPlanProgress}
       onStreamProgress={handleStreamProgress}
       onStreamStatus={handleStreamStatus}
+      onStreamAssistantDelta={handleStreamAssistantDelta}
+      onStreamAssistantReset={handleStreamAssistantReset}
       isChatBusy={isChatBusy}
       composerRef={composerRef}
       onContinueAgent={handleContinueAgent}
       onActionCard={handleActionCard}
+      onChatRollback={handleChatRollback}
     />
   );
 
