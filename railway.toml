@@ -4,4 +4,4 @@ buildCommand = "pnpm build"
 
 [deploy]
 preDeployCommand = "pnpm db:migrate:deploy"
-startCommand = "pnpm start"
+startCommand = "pnpm start:all"

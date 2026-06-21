@@ -66,17 +66,18 @@ pnpm dev               # Next.js + bot-worker (polling в dev)
 |------|---------|
 | Build | `pnpm build` |
 | Pre-deploy | `pnpm db:migrate:deploy` |
-| Start | `pnpm start` |
+| Start | `pnpm start:all` (Next.js + bot-worker в одном контейнере) |
 
 Если в Railway Dashboard задан свой **Build Command** со старым `db:migrate:deploy` — удалите его или оставьте только `pnpm build`, иначе UI перебьёт `railway.toml`.
 
 **Сервисы в проекте:**
 
-1. **Web** — это приложение (подключить репозиторий).
-2. **Bot-worker** (опционально, при `BOT_DELIVERY_MODE=polling`) — тот же репозиторий, **без публичного домена**, start: `pnpm start:worker`. Скопируйте env с web (`DATABASE_URL`, `REDIS_URL`, `SECRETS_ENC_KEY`, …) и добавьте `BOT_DELIVERY_MODE=polling`.
-3. **PostgreSQL** — `DATABASE_URL=${{Postgres.DATABASE_URL}}` (internal URL, не PUBLIC).
-4. **Redis** — `REDIS_URL=${{Redis.REDIS_URL}}`.
-5. **MinIO** (или любой S3) — медиа-вложения ботов. Локальный диск (`MEDIA_STORAGE_DRIVER=local`) на Railway эфемерен: файлы пропадут при редеплое.
+1. **Web** — это приложение (подключить репозиторий). `railway.toml` поднимает **и сайт, и bot-worker** (`pnpm start:all`).
+2. **PostgreSQL** — `DATABASE_URL=${{Postgres.DATABASE_URL}}` (internal URL, не PUBLIC).
+3. **Redis** — `REDIS_URL=${{Redis.REDIS_URL}}`.
+4. **MinIO** (или любой S3) — медиа-вложения ботов. Локальный диск (`MEDIA_STORAGE_DRIVER=local`) на Railway эфемерен: файлы пропадут при редеплое.
+
+Отдельный bot-worker сервис (`railway.worker.toml`) — опционально, если нужно масштабировать web и polling независимо.
 
 **Пример переменных (web-сервис):**
 
@@ -85,7 +86,7 @@ NODE_ENV=production
 APP_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}
 AUTH_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}
 
-# Надёжнее webhook на Railway: polling + отдельный bot-worker сервис.
+# Надёжнее webhook на Railway: polling (worker стартует вместе с web через start:all).
 BOT_DELIVERY_MODE=polling
 
 DATABASE_URL=${{Postgres.DATABASE_URL}}
@@ -194,8 +195,9 @@ WantedBy=multi-user.target
 
 - `pnpm dev` — дев-сервер (web + bot-worker).
 - `pnpm dev:web` / `pnpm dev:worker` — компоненты по отдельности.
-- `pnpm build` / `pnpm start` — продакшен-сборка и запуск.
-- `pnpm start:worker` — bot-worker (polling в prod при `BOT_DELIVERY_MODE=polling`).
+- `pnpm build` / `pnpm start` — продакшен-сборка и запуск Next.js.
+- `pnpm start:all` — web + bot-worker (как на Railway).
+- `pnpm start:worker` — только bot-worker.
 - `pnpm lint` / `pnpm lint:fix` — проверка/автофикс через Biome.
 - `pnpm test` — юнит-тесты (Vitest).
 - `pnpm db:migrate` — миграции в dev (`migrate dev`).

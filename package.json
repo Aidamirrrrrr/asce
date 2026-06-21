@@ -9,6 +9,7 @@
     "build": "next build",
     "start": "next start",
     "start:worker": "BOT_WORKER_PROCESS=1 tsx scripts/bot-worker.ts",
+    "start:all": "concurrently -k -n web,worker -c blue,magenta \"pnpm start\" \"pnpm start:worker\"",
     "lint": "biome check --error-on-warnings",
     "lint:fix": "biome check --write",
     "test": "vitest run",
