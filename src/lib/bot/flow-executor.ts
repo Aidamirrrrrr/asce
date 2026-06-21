@@ -338,6 +338,7 @@ async function executeNode(
             runQueued(() => generateAiReply(node.data.systemPrompt, userMessage)),
           )
         : await runQueued(() => generateAiReply(node.data.systemPrompt, userMessage));
+      await persistVariable(port, "ai_response", reply);
       await port.sendText(reply);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Ошибка AI";
