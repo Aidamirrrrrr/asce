@@ -56,21 +56,49 @@ export async function POST(request: Request, context: RouteContext) {
     // conversation don't race on the shared session store.
     const chatId = getUpdateChatId(update);
     const queueKey = `${projectId}:${chatId ?? "unknown"}`;
+
+    logger.info("telegram_webhook_received", {
+      projectId,
+      chatId: chatId ?? null,
+      updateId: update.update_id,
+      kind: update.message
+        ? "message"
+        : update.callback_query
+          ? "callback_query"
+          : Object.keys(update).find((k) => k !== "update_id"),
+      text: update.message?.text ?? update.callback_query?.data ?? null,
+    });
+
     void runSerializedByKey(queueKey, async () => {
+      const startedAt = Date.now();
       try {
         const bot = createProjectBot(withDecryptedBotToken(project));
         await bot.init();
         await bot.handleUpdate(update);
+        logger.info("telegram_webhook_processed", {
+          projectId,
+          chatId: chatId ?? null,
+          updateId: update.update_id,
+          ms: Date.now() - startedAt,
+        });
       } catch (error) {
         logger.error("telegram_webhook_update_error", {
           projectId,
+          chatId: chatId ?? null,
+          updateId: update.update_id,
+          ms: Date.now() - startedAt,
           message: error instanceof Error ? error.message : "unknown",
+          stack: error instanceof Error ? error.stack : undefined,
         });
       }
     });
 
     return new NextResponse(null, { status: 200 });
   } catch (error) {
+    logger.error("telegram_webhook_error", {
+      message: error instanceof Error ? error.message : "unknown",
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Ошибка webhook" },
       { status: 500 },

@@ -47,6 +47,7 @@ import { createDefaultFlow } from "@/lib/flow/default-flow";
 import type { ConditionNodeData } from "@/lib/flow/flow-schema";
 import { loadFlowDocument } from "@/lib/flow/load-flow-document";
 import { parseCallbackData } from "@/lib/flow/message-node-utils";
+import { logger } from "@/lib/logger";
 
 export function createProjectBot(project: Pick<Project, "id" | "botToken">): Bot {
   if (!project.botToken) {
@@ -171,6 +172,17 @@ export function createProjectBot(project: Pick<Project, "id" | "botToken">): Bot
         return;
       }
 
+      logger.error("bot_flow_error", {
+        projectId: project.id,
+        chatId: ctx.chat?.id ?? null,
+        userId: ctx.from?.id ?? null,
+        message,
+        ...(error instanceof GrammyError
+          ? { grammyMethod: error.method, grammyCode: error.error_code }
+          : {}),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+
       await db.project.update({
         where: { id: project.id },
         data: {
@@ -244,7 +256,12 @@ export function createProjectBot(project: Pick<Project, "id" | "botToken">): Bot
 
         const flow = loadFlowDocument(current.flowJson, createDefaultFlow());
         const userMessage = ctx.callbackQuery.message?.text ?? "";
-        const outboundPort = await createOutboundPort(ctx, current.flowJson, undefined, userMessage);
+        const outboundPort = await createOutboundPort(
+          ctx,
+          current.flowJson,
+          undefined,
+          userMessage,
+        );
 
         const result = await executeFlowFromCallback(
           flow,

@@ -1,5 +1,5 @@
 import { generateAiReply } from "@/lib/ai/ai-client";
-import { runQueued } from "@/lib/ai/ai-queue";
+import { getQueueState, runQueued } from "@/lib/ai/ai-queue";
 import { runWithAiUsage } from "@/lib/billing/ai-usage-context";
 import { getProjectOwnerId } from "@/lib/billing/project-owner";
 import type { ExecutionContext } from "@/lib/bot/execution-context";
@@ -33,6 +33,7 @@ import {
 import { interpolateTemplate } from "@/lib/flow/template-vars";
 import { normalizeTriggerNodeData } from "@/lib/flow/trigger-node-utils";
 import { normalizeWaitInputNodeData } from "@/lib/flow/wait-input-node-utils";
+import { logger } from "@/lib/logger";
 import { stripTextEmojisOptional } from "@/lib/text/strip-emojis";
 
 import type { OutboundMessagePayload, SendOutboundResult } from "./send-message";
@@ -331,6 +332,13 @@ async function executeNode(
   }
 
   if (isAiReplyNode(node)) {
+    const aiStartedAt = Date.now();
+    logger.info("ai_reply_start", {
+      projectId: port.executionContext.projectId,
+      nodeId: node.id,
+      userMessagePreview: userMessage.slice(0, 120),
+      queue: getQueueState(),
+    });
     try {
       const ownerUserId = await getProjectOwnerId(port.executionContext.projectId);
       const reply = ownerUserId
@@ -338,10 +346,23 @@ async function executeNode(
             runQueued(() => generateAiReply(node.data.systemPrompt, userMessage)),
           )
         : await runQueued(() => generateAiReply(node.data.systemPrompt, userMessage));
+      logger.info("ai_reply_ok", {
+        projectId: port.executionContext.projectId,
+        nodeId: node.id,
+        ms: Date.now() - aiStartedAt,
+        replyLength: reply.length,
+      });
       await persistVariable(port, "ai_response", reply);
       await port.sendText(reply);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Ошибка AI";
+      logger.error("ai_reply_error", {
+        projectId: port.executionContext.projectId,
+        nodeId: node.id,
+        ms: Date.now() - aiStartedAt,
+        message,
+        stack: error instanceof Error ? error.stack : undefined,
+      });
       if (message.includes("AI_API_KEY")) {
         await port.sendText("AI-ответ недоступен: не задан ключ AI_API_KEY в .env");
         return;
