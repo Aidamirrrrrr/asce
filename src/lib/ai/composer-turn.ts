@@ -9,6 +9,7 @@ import {
   createBuildPlanCollectingCallbacks,
 } from "@/lib/chat/build-plan-message";
 import { createEmptyFlow } from "@/lib/flow/default-flow";
+import { buildFlowCompletionReport } from "@/lib/flow/flow-completion-report";
 import type { BotFlowDocument } from "@/lib/flow/flow-schema";
 import { enrichFlowWithInferredSecrets } from "@/lib/flow/secret-recipes";
 import {
