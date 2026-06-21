@@ -12,13 +12,13 @@ type RouteContext = {
 };
 
 export async function POST(_request: Request, context: RouteContext) {
+  const { id } = await context.params;
   try {
     const authResult = await requireUser();
     if ("error" in authResult) {
       return authResult.error;
     }
 
-    const { id } = await context.params;
     const owned = await getOwnedProject(authResult.userId, id);
     if ("error" in owned) {
       return owned.error;
@@ -38,7 +38,6 @@ export async function POST(_request: Request, context: RouteContext) {
     const message = error instanceof Error ? error.message : "Не удалось запустить бота";
 
     try {
-      const { id } = await context.params;
       await db.project.update({
         where: { id },
         data: { runtimeStatus: "error", lastError: message },

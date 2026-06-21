@@ -1,18 +1,20 @@
-import { Bot } from "grammy";
+import { Bot, GrammyError } from "grammy";
 
 import type { Project } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { createDefaultFlow } from "@/lib/flow/default-flow";
 import { loadFlowDocument } from "@/lib/flow/load-flow-document";
+import { logger } from "@/lib/logger";
 
 import { isPollingDelegatedToWorker, shouldRunPollingInThisProcess } from "./bot-runtime-mode";
-import { buildWebhookUrl, resolveDeliveryMode } from "./config";
+import { buildWebhookUrl, getAppUrl, resolveDeliveryMode } from "./config";
 import { createProjectBot } from "./create-project-bot";
 import { collectRequiredSecretKeys, flowHasTrigger } from "./flow-executor";
 import { clearTelegramWebhook, haltPollingBot, runPollingBot } from "./polling-runtime";
 import { markProjectError, markProjectStopped } from "./project-runtime-status";
 import { findMissingRequiredSecrets } from "./project-secrets";
 import { requireDecryptedBotToken, withDecryptedBotToken } from "./project-token";
+import { formatTelegramBotApiError } from "./telegram-api-errors";
 import { ensureProjectWebhookSecret } from "./webhook-secret";
 
 type RuntimeRegistryGlobal = typeof globalThis & {
@@ -67,6 +69,50 @@ async function validateProjectSecretsForStart(project: Project): Promise<void> {
   }
 }
 
+function assertWebhookAppUrl(): void {
+  const appUrl = getAppUrl();
+  if (!appUrl.startsWith("https://")) {
+    throw new Error(
+      `APP_URL должен быть публичным HTTPS (сейчас: ${appUrl}). Для webhook задайте, например, https://asce.tech`,
+    );
+  }
+}
+
+async function registerProjectWebhook(project: Project): Promise<void> {
+  if (!project.webhookSecret) {
+    throw new Error("Секрет webhook не сгенерирован");
+  }
+
+  assertWebhookAppUrl();
+
+  const bot = createProjectBot(withDecryptedBotToken(project));
+  const webhookUrl = buildWebhookUrl(project.id, project.webhookSecret);
+
+  logger.info("bot_set_webhook_start", {
+    projectId: project.id,
+    appUrl: getAppUrl(),
+    webhookPath: `/api/telegram/webhook/${project.id}`,
+  });
+
+  try {
+    const me = await bot.api.getMe();
+    await bot.api.setWebhook(webhookUrl, { drop_pending_updates: true });
+    logger.info("bot_set_webhook_ok", {
+      projectId: project.id,
+      botUsername: me.username ?? null,
+    });
+  } catch (error) {
+    logger.error("bot_set_webhook_failed", {
+      projectId: project.id,
+      message: error instanceof Error ? error.message : "unknown",
+      ...(error instanceof GrammyError
+        ? { grammyCode: error.error_code, grammyDescription: error.description }
+        : {}),
+    });
+    throw new Error(formatTelegramBotApiError(error, "Не удалось зарегистрировать webhook"));
+  }
+}
+
 export async function startProjectBot(project: Project): Promise<void> {
   const locks = getStartLocks();
   const previous = locks.get(project.id) ?? Promise.resolve();
@@ -104,13 +150,7 @@ async function startProjectBotInner(project: Project): Promise<void> {
       await clearTelegramWebhook(requireDecryptedBotToken(readyProject));
     }
   } else {
-    if (!readyProject.webhookSecret) {
-      throw new Error("Секрет webhook не сгенерирован");
-    }
-
-    const bot = createProjectBot(withDecryptedBotToken(readyProject));
-    const webhookUrl = buildWebhookUrl(readyProject.id, readyProject.webhookSecret);
-    await bot.api.setWebhook(webhookUrl, { drop_pending_updates: true });
+    await registerProjectWebhook(readyProject);
   }
 
   await db.project.update({
