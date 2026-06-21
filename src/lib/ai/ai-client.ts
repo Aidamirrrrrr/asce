@@ -25,11 +25,20 @@ export function getAiClient(): OpenAI {
     throw new Error("AI_API_KEY не задан");
   }
 
+  // Hard timeout so a hanging/slow upstream (Immers.cloud) fails fast instead of
+  // holding an AI-queue slot and blocking the chat's update queue. Without this
+  // the OpenAI SDK default is 10 minutes, which makes the bot appear "dead" and
+  // stop answering even /start while a single request hangs.
+  const timeout = Number(process.env.AI_TIMEOUT_MS ?? "30000");
+  const maxRetries = Number(process.env.AI_SDK_MAX_RETRIES ?? "1");
+
   return new OpenAI({
     apiKey,
     baseURL:
       process.env.AI_BASE_URL ??
       "https://chat.immers.cloud/v1/endpoints/qwen3-coder-next-tensor/generate",
+    timeout: Number.isFinite(timeout) && timeout > 0 ? timeout : 30000,
+    maxRetries: Number.isFinite(maxRetries) && maxRetries >= 0 ? maxRetries : 1,
   });
 }
 
