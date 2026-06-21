@@ -8,6 +8,7 @@ import { collectRequiredSecretKeys, flowHasTrigger } from "./flow-executor";
 import {
   getActivePollingProjectIds,
   haltPollingBot,
+  isPollingBotRunning,
   pollingBotNeedsRestart,
   runPollingBot,
 } from "./polling-runtime";
@@ -16,8 +17,16 @@ import { processDueJobs } from "./scheduled-jobs";
 
 const SYNC_INTERVAL_MS = 2_000;
 const JOB_PROCESS_INTERVAL_MS = 7_000;
+const STARTUP_POLLING_RETRY_MS = 3_000;
+const STARTUP_POLLING_RETRY_WINDOW_MS = 90_000;
 
 let syncInFlight: Promise<void> | null = null;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
 
 async function loadPollingCandidates(): Promise<Project[]> {
   return db.project.findMany({
@@ -84,10 +93,40 @@ function syncPollingBots(): Promise<void> {
   return syncInFlight;
 }
 
+async function restorePollingBotsOnStartup(): Promise<void> {
+  const deadline = Date.now() + STARTUP_POLLING_RETRY_WINDOW_MS;
+
+  while (Date.now() < deadline) {
+    await syncPollingBots();
+
+    const candidates = await loadPollingCandidates();
+    const pending: Project[] = [];
+    for (const project of candidates) {
+      if (!(await canStartProject(project))) {
+        continue;
+      }
+      if (!isPollingBotRunning(project)) {
+        pending.push(project);
+      }
+    }
+
+    if (pending.length === 0) {
+      return;
+    }
+
+    console.log(
+      `[worker] startup: ${pending.length} polling bot(s) not running yet, retry in ${STARTUP_POLLING_RETRY_MS}ms`,
+    );
+    await sleep(STARTUP_POLLING_RETRY_MS);
+  }
+
+  console.warn("[worker] startup: some polling bots may still be waiting for Redis lock");
+}
+
 export function runBotPollingWorker(): void {
   console.log("[worker] bot polling worker started");
 
-  void syncPollingBots();
+  void restorePollingBotsOnStartup();
 
   setInterval(() => {
     void syncPollingBots().catch((error) => {

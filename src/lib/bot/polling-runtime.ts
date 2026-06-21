@@ -10,12 +10,15 @@ import { decryptBotTokenFromStorage, withDecryptedBotToken } from "./project-tok
 
 const POLLING_START_DELAY_MS = 350;
 const POLLING_CONFLICT_RETRIES = 5;
+/** If onStart never fires, treat the poller as stuck and restart on next sync. */
+const POLLING_START_TIMEOUT_MS = 25_000;
 
 type PollingEntry = {
   bot: Bot;
   botToken: string;
   flowJson: string;
   started: boolean;
+  registeredAt: number;
   lock: PollingLock;
 };
 
@@ -127,6 +130,7 @@ async function startPollingLoop(
           botToken,
           flowJson: project.flowJson ?? "",
           started: false,
+          registeredAt: Date.now(),
           lock,
         });
         continue;
@@ -192,6 +196,7 @@ export async function runPollingBot(project: Project): Promise<boolean> {
       botToken,
       flowJson: project.flowJson ?? "",
       started: false,
+      registeredAt: Date.now(),
       lock,
     });
 
@@ -220,6 +225,10 @@ export function pollingBotNeedsRestart(
 
   const entry = registry.get(project.id);
   if (!entry) {
+    return true;
+  }
+
+  if (!entry.started && Date.now() - entry.registeredAt > POLLING_START_TIMEOUT_MS) {
     return true;
   }
 

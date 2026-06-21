@@ -473,6 +473,13 @@ async function walkFromNode(
       return outboundToWalkResult(sendResult);
     }
 
+    // Inline/reply keyboards wait for user input — never auto-follow "next".
+    // AI-generated flows sometimes add a spurious next edge alongside btn-* /
+    // reply-* handles; without this guard /start would skip straight to a branch.
+    if (data.keyboard?.type === "inline" || data.keyboard?.type === "reply") {
+      return outboundToWalkResult(sendResult);
+    }
+
     const nextEdges = getOutgoingEdges(flow, nodeId, "next");
     for (const edge of nextEdges) {
       const paused = await walkFromNode(flow, edge.target, userMessage, port, visited);
