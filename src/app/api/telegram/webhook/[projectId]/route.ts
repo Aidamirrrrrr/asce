@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 import { createProjectBot } from "@/lib/bot/create-project-bot";
 import { withDecryptedBotToken } from "@/lib/bot/project-token";
+import { getUpdateChatId, runSerializedByKey } from "@/lib/bot/update-queue";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { enforceRateLimit, getClientIp } from "@/lib/rate-limit/limiter";
@@ -51,7 +52,11 @@ export async function POST(request: Request, context: RouteContext) {
     // execution can take longer than Telegram's webhook timeout (e.g. slow AI
     // replies); blocking here makes Telegram retry and duplicate updates.
     // Safe because the app runs as a single long-lived process (see memory).
-    void (async () => {
+    // Updates are serialized per chat so concurrent messages from the same
+    // conversation don't race on the shared session store.
+    const chatId = getUpdateChatId(update);
+    const queueKey = `${projectId}:${chatId ?? "unknown"}`;
+    void runSerializedByKey(queueKey, async () => {
       try {
         const bot = createProjectBot(withDecryptedBotToken(project));
         await bot.init();
@@ -62,7 +67,7 @@ export async function POST(request: Request, context: RouteContext) {
           message: error instanceof Error ? error.message : "unknown",
         });
       }
-    })();
+    });
 
     return new NextResponse(null, { status: 200 });
   } catch (error) {
