@@ -30,6 +30,21 @@ describe("chat rollback", () => {
     expect(state?.flow.name).toBe("B");
   });
 
+  it("restores flow snapshot stored on user message", () => {
+    const messagesWithUserSnapshot = [
+      createChatMessage("user", "Собери бота", undefined, { flowSnapshot: flowA }),
+      createChatMessage("assistant", "Готово", undefined, { flowSnapshot: flowB }),
+      createChatMessage("user", "Добавь меню", undefined, { flowSnapshot: flowB }),
+      createChatMessage("assistant", "Меню добавлено", undefined, {
+        flowSnapshot: { ...flowB, name: "C" },
+      }),
+    ];
+
+    const state = resolveRollbackState(messagesWithUserSnapshot, messagesWithUserSnapshot[2]?.id ?? "");
+    expect(state?.messages).toHaveLength(3);
+    expect(state?.flow.name).toBe("B");
+  });
+
   it("restores previous flow snapshot for user target", () => {
     const state = resolveRollbackState(messages, messages[2]?.id ?? "");
     expect(state?.messages).toHaveLength(3);

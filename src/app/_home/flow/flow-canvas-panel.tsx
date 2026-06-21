@@ -156,7 +156,7 @@ export function FlowCanvasPanelContent({
           flowDocument={editorDocument}
           revealDelayMs={preferImmediateReveal ? 0 : undefined}
           externalDocument={hasStreamingDocument ? externalDocument : null}
-          documentRevision={hasStreamingDocument ? documentRevision : 0}
+          documentRevision={documentRevision}
           isFlowGenerating={isFlowGenerating}
           onDocumentChange={handleDocumentChange}
           relayoutRef={relayoutRef}

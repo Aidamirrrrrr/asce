@@ -51,14 +51,34 @@ export function resolveFlowSnapshotAtIndex(
     return null;
   }
 
-  if (target.role === "assistant" && target.meta?.flowSnapshot) {
+  if (target.role === "user" && target.meta?.flowSnapshot) {
+    return target.meta.flowSnapshot;
+  }
+
+  if (
+    target.role === "assistant" &&
+    target.meta?.flowSnapshot &&
+    !target.meta?.buildPlan
+  ) {
     return target.meta.flowSnapshot;
   }
 
   for (let index = targetIndex; index >= 0; index -= 1) {
-    const snapshot = messages[index]?.meta?.flowSnapshot;
-    if (snapshot) {
-      return snapshot;
+    const message = messages[index];
+    if (!message) {
+      continue;
+    }
+
+    if (message.role === "user" && message.meta?.flowSnapshot) {
+      return message.meta.flowSnapshot;
+    }
+
+    if (
+      message.role === "assistant" &&
+      message.meta?.flowSnapshot &&
+      !message.meta?.buildPlan
+    ) {
+      return message.meta.flowSnapshot;
     }
   }
 

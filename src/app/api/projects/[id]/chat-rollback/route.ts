@@ -4,8 +4,8 @@ import { resolveRollbackState } from "@/lib/chat/chat-rollback";
 import { getOwnedProject, requireUser } from "@/lib/auth/session";
 import { syncFlowSecretDeclarations } from "@/lib/bot/project-secrets";
 import { db } from "@/lib/db";
-import { createDefaultFlow } from "@/lib/flow/default-flow";
-import { parseFlowJson, serializeFlowJson } from "@/lib/flow/flow-schema";
+import { createEmptyFlow } from "@/lib/flow/default-flow";
+import { serializeFlowJson } from "@/lib/flow/flow-schema";
 import { parseChatJson, serializeChatJson, serializeProject } from "@/lib/projects";
 
 type RouteContext = {
@@ -31,8 +31,7 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const messages = parseChatJson(owned.project.chatJson);
-  const fallbackFlow = parseFlowJson(owned.project.flowJson, createDefaultFlow());
-  const rollback = resolveRollbackState(messages, messageId, fallbackFlow);
+  const rollback = resolveRollbackState(messages, messageId, createEmptyFlow());
 
   if (!rollback) {
     return NextResponse.json({ error: "Не удалось откатить чат" }, { status: 400 });

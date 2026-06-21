@@ -170,6 +170,12 @@ export function useFlowPersistence(projectId: string) {
   }, [flushSave]);
 
   const syncDocument = useCallback((doc: BotFlowDocument) => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    pendingDocRef.current = null;
+    setSaveStatus("idle");
     setInitialDocument(prepareLoadedDocument(doc));
   }, []);
 

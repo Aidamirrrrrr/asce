@@ -8,7 +8,7 @@ import {
   createBuildPlanChatMessage,
   createBuildPlanCollectingCallbacks,
 } from "@/lib/chat/build-plan-message";
-import { buildFlowCompletionReport } from "@/lib/flow/flow-completion-report";
+import { createEmptyFlow } from "@/lib/flow/default-flow";
 import type { BotFlowDocument } from "@/lib/flow/flow-schema";
 import { enrichFlowWithInferredSecrets } from "@/lib/flow/secret-recipes";
 import {
@@ -85,13 +85,18 @@ function buildTurnMessages(
     assistantMeta?: ProjectChatMessageMeta;
     buildPlan?: ChatBuildPlanState | null;
     flowSnapshot?: BotFlowDocument;
+    flowBefore?: BotFlowDocument;
   },
 ): ProjectChatMessage[] {
   const clearedHistory = chatHistory.map(clearStepLimitMeta);
   const messages: ProjectChatMessage[] = [...clearedHistory];
 
   if (options.recordUserMessage) {
-    messages.push(createChatMessage("user", userMessage));
+    messages.push(
+      createChatMessage("user", userMessage, undefined, {
+        ...(options.flowBefore ? { flowSnapshot: options.flowBefore } : {}),
+      }),
+    );
   }
 
   if (options.buildPlan) {
@@ -210,6 +215,7 @@ async function resolveFlowComposerTurn(
       recordUserMessage,
       assistantMeta,
       buildPlan: getCollectedBuildPlan(),
+      flowBefore: currentFlow,
       flowSnapshot: flow,
     }),
     flow,
@@ -263,7 +269,9 @@ export async function resolveCreateComposerTurn(input: {
   const stepLimitReached = generation.stepLimitReached ?? false;
   const assistantMeta = stepLimitReached ? { stepLimitReached: true as const } : undefined;
   const buildPlan = getCollectedBuildPlan();
-  const messages: ProjectChatMessage[] = [createChatMessage("user", prompt)];
+  const messages: ProjectChatMessage[] = [
+    createChatMessage("user", prompt, undefined, { flowSnapshot: createEmptyFlow() }),
+  ];
 
   if (buildPlan) {
     messages.push(createBuildPlanChatMessage(buildPlan));
