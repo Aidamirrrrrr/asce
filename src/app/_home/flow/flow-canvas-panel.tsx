@@ -12,6 +12,7 @@ import { type FlowSaveStatus, useFlowPersistence } from "@/app/_home/flow/use-fl
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { BotFlowDocument } from "@/lib/flow/flow-schema";
+import { isStreamingSeedFlow } from "@/lib/flow/default-flow";
 
 type FlowCanvasPanelContentProps = {
   projectId: string;
@@ -80,8 +81,12 @@ export function FlowCanvasPanelContent({
     [isFlowGenerating, queueSave],
   );
 
-  const hasStreamingDocument = Boolean(externalDocument && externalDocument.nodes.length > 0);
   const persistedDocument = committedDocument ?? initialDocument;
+  const hasStreamingDocument = Boolean(
+    externalDocument &&
+      !isStreamingSeedFlow(externalDocument) &&
+      (externalDocument.nodes.length > 0 || (persistedDocument?.nodes.length ?? 0) === 0),
+  );
   const editorDocument =
     isFlowGenerating && hasStreamingDocument ? externalDocument : persistedDocument;
 
@@ -150,8 +155,8 @@ export function FlowCanvasPanelContent({
           projectId={projectId}
           flowDocument={editorDocument}
           revealDelayMs={preferImmediateReveal ? 0 : undefined}
-          externalDocument={externalDocument}
-          documentRevision={documentRevision}
+          externalDocument={hasStreamingDocument ? externalDocument : null}
+          documentRevision={hasStreamingDocument ? documentRevision : 0}
           isFlowGenerating={isFlowGenerating}
           onDocumentChange={handleDocumentChange}
           relayoutRef={relayoutRef}

@@ -26,6 +26,20 @@ export function createStreamingSeedFlow(): BotFlowDocument {
   };
 }
 
+/** Placeholder shown only while creating a bot from scratch — not a real saved flow. */
+export function isStreamingSeedFlow(doc: BotFlowDocument | null | undefined): boolean {
+  if (!doc) {
+    return false;
+  }
+
+  return (
+    doc.nodes.length === 1 &&
+    doc.nodes[0]?.type === "trigger" &&
+    doc.edges.length === 0 &&
+    doc.nodes[0]?.id.startsWith("stream-node-")
+  );
+}
+
 export function createDefaultFlow(): BotFlowDocument {
   return {
     nodes: [

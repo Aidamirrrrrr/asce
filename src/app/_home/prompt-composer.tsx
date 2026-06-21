@@ -115,7 +115,7 @@ export const PromptComposer = forwardRef<PromptComposerHandle, PromptComposerPro
       onGenerationStart?.(body.instruction ?? "", {
         silent: options.silent,
         forceFlow: body.continueAgent === true,
-        preserveFlow: body.continueAgent === true,
+        preserveFlow: true,
       });
 
       try {

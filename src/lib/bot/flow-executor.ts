@@ -413,8 +413,25 @@ async function walkFromNode(
   visited.add(nodeId);
 
   const node = flow.nodes.find((item) => item.id === nodeId);
-  if (!node || node.type === "trigger") {
+  if (!node) {
     return;
+  }
+
+  // Callback/branch edges sometimes target a trigger (e.g. «Назад» → /start).
+  // Triggers are entry points — traverse their outgoing chain like executeFlow does.
+  if (node.type === "trigger") {
+    const outgoing = getOutgoingEdges(flow, nodeId);
+    let merged: FlowWalkResult | undefined;
+
+    for (const edge of outgoing) {
+      const result = await walkFromNode(flow, edge.target, userMessage, port, visited);
+      merged = mergeWalkResults(merged, result);
+      if (merged?.inputWaitSession || merged?.replyKeyboardSession) {
+        return merged;
+      }
+    }
+
+    return merged;
   }
 
   logger.info("flow_node_walk", {
