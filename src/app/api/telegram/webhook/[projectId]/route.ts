@@ -1,9 +1,10 @@
-import { webhookCallback } from "grammy";
+import type { Update } from "grammy/types";
 import { NextResponse } from "next/server";
 
 import { createProjectBot } from "@/lib/bot/create-project-bot";
 import { withDecryptedBotToken } from "@/lib/bot/project-token";
 import { db } from "@/lib/db";
+import { logger } from "@/lib/logger";
 import { enforceRateLimit, getClientIp } from "@/lib/rate-limit/limiter";
 
 export const runtime = "nodejs";
@@ -44,10 +45,26 @@ export async function POST(request: Request, context: RouteContext) {
       return NextResponse.json({ error: "Токен бота не задан" }, { status: 400 });
     }
 
-    const bot = createProjectBot(withDecryptedBotToken(project));
-    const handleWebhook = webhookCallback(bot, "std/http");
+    const update = (await request.json()) as Update;
 
-    return await handleWebhook(request);
+    // Ack Telegram immediately and process the update in the background. Flow
+    // execution can take longer than Telegram's webhook timeout (e.g. slow AI
+    // replies); blocking here makes Telegram retry and duplicate updates.
+    // Safe because the app runs as a single long-lived process (see memory).
+    void (async () => {
+      try {
+        const bot = createProjectBot(withDecryptedBotToken(project));
+        await bot.init();
+        await bot.handleUpdate(update);
+      } catch (error) {
+        logger.error("telegram_webhook_update_error", {
+          projectId,
+          message: error instanceof Error ? error.message : "unknown",
+        });
+      }
+    })();
+
+    return new NextResponse(null, { status: 200 });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Ошибка webhook" },
