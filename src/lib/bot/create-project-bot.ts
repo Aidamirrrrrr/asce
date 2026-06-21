@@ -21,6 +21,7 @@ import {
   type FlowOutboundPort,
   type FlowWalkResult,
   findReplyButtonMatch,
+  messageMatchesCommandTrigger,
 } from "@/lib/bot/flow-executor";
 import { syncInactivityJobs } from "@/lib/bot/inactivity-jobs";
 import {
@@ -89,7 +90,13 @@ export function createProjectBot(project: Pick<Project, "id" | "botToken">): Bot
       executionContext,
       flowJson,
       sendText: async (text: string) => {
-        await ctx.reply(text);
+        const sent = await ctx.reply(text);
+        logger.info("bot_send_text", {
+          projectId: project.id,
+          chatId: ctx.chat?.id ?? null,
+          messageId: sent.message_id,
+          length: text.length,
+        });
       },
       sendChatAction: async (action: "typing") => {
         if (executionContext.chatId) {
@@ -313,7 +320,12 @@ export function createProjectBot(project: Pick<Project, "id" | "botToken">): Bot
         userMessage,
       );
 
-      const inputSession = await getInputWaitSession(project.id, chatId);
+      // A command like /start must always restart the flow, even while the bot
+      // is waiting for input or for a reply-keyboard tap. Otherwise the command
+      // gets captured as the awaited answer and the user appears "stuck".
+      const isCommandTrigger = messageMatchesCommandTrigger(flow, userMessage);
+
+      const inputSession = isCommandTrigger ? null : await getInputWaitSession(project.id, chatId);
       if (inputSession) {
         await clearInputWaitSession(project.id, chatId);
 
@@ -329,7 +341,9 @@ export function createProjectBot(project: Pick<Project, "id" | "botToken">): Bot
         return;
       }
 
-      const replySession = await getReplyKeyboardSession(project.id, chatId);
+      const replySession = isCommandTrigger
+        ? null
+        : await getReplyKeyboardSession(project.id, chatId);
       if (replySession) {
         const match = findReplyButtonMatch(flow, replySession.nodeId, userMessage);
         await clearReplyKeyboardSession(project.id, chatId);

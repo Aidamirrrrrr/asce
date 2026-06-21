@@ -8,6 +8,7 @@ import {
 import { recordBotEvent } from "@/lib/bot/bot-analytics";
 import type { MessageAttachment, MessageKeyboard, MessageNodeData } from "@/lib/flow/flow-schema";
 import { formatCallbackData } from "@/lib/flow/message-node-utils";
+import { logger } from "@/lib/logger";
 
 export type OutboundMessagePayload = Pick<
   MessageNodeData,
@@ -223,9 +224,17 @@ export async function sendOutboundMessageToChat(
       return {};
     }
 
-    await api.sendMessage(chatId, text, {
+    const sent = await api.sendMessage(chatId, text, {
       ...common,
       ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+    });
+
+    logger.info("bot_send_message", {
+      projectId,
+      chatId,
+      nodeId,
+      messageId: sent.message_id,
+      length: text.length,
     });
 
     return buildReplySession(nodeId, payload.keyboard);

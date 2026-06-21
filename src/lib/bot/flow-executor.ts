@@ -699,6 +699,20 @@ export function flowHasTrigger(flow: BotFlowDocument): boolean {
   return flow.nodes.some((node) => node.type === "trigger");
 }
 
+/**
+ * True when the message is a command that matches a command trigger (e.g.
+ * /start). Used to let commands break out of an active input-wait/reply
+ * session instead of being captured as the awaited answer.
+ */
+export function messageMatchesCommandTrigger(flow: BotFlowDocument, messageText: string): boolean {
+  if (!messageText.startsWith("/")) {
+    return false;
+  }
+
+  const trigger = findMatchingTrigger(flow, messageText);
+  return trigger != null && (trigger.data as TriggerNodeData).triggerType !== "any_message";
+}
+
 export function collectRequiredSecretKeys(flow: BotFlowDocument): string[] {
   const keys = new Set<string>();
 
