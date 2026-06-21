@@ -1,0 +1,7 @@
+# Railway deploy config. DB is not reachable during build — run migrations at deploy time.
+[build]
+buildCommand = "pnpm build"
+
+[deploy]
+preDeployCommand = "pnpm db:migrate:deploy"
+startCommand = "pnpm start"

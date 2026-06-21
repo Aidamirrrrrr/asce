@@ -67,6 +67,8 @@ pnpm build
 pnpm start               # Next.js на порту 3000
 ```
 
+На Railway миграции выполняются в `preDeployCommand` (`railway.toml`), не во время build.
+
 Переменные: `DATABASE_URL`, `APP_URL`, `AI_API_KEY`, `CRON_SECRET`, `NODE_ENV=production`.
 
 ### 3. Bot-worker (polling / отложенные задачи)
