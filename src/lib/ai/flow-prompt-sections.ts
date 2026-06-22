@@ -108,7 +108,17 @@ export const KEYBOARD_SECTION = `keyboard:
 - { "type": "reply", "rows": [[{ "text": "Контакт", "kind": "request_contact" }]] }
   kind reply: text | request_contact | request_location
 - { "type": "remove" } — убрать reply-клавиатуру у пользователя
-Текст кнопок — до 64 символов. url/web_app/copy_text/switch_inline — без ветки на холсте.`;
+Текст кнопок — до 64 символов. url/web_app/copy_text/switch_inline — без ветки на холсте.
+
+ПРИМЕР — меню «Услуги / Контакты / Помощь» (обязательный порядок):
+  1) add_node("message", data:{text:"Выберите раздел:", keyboard:{type:"inline",buttons:[["Услуги"],["Контакты"],["Помощь"]]}}) → id: msg_menu
+  2) add_node("message", data:{text:"Описание услуг..."}) → id: msg_services
+     connect_nodes(source:"msg_menu", target:"msg_services", buttonText:"Услуги")
+  3) add_node("message", data:{text:"Контакты:..."}) → id: msg_contacts
+     connect_nodes(source:"msg_menu", target:"msg_contacts", buttonText:"Контакты")
+  4) add_node("message", data:{text:"FAQ и помощь..."}) → id: msg_help
+     connect_nodes(source:"msg_menu", target:"msg_help", buttonText:"Помощь")
+Кнопка «Назад в меню»: create узел в ветке → connect_nodes(source:этот_узел, target:msg_menu).`;
 
 // Few-shot библиотека архетипов: подсказывает модели готовые паттерны под частые задачи.
 export const TEMPLATES_SECTION = `Готовые шаблоны (архетипы) — выбирай подходящий и адаптируй под задачу:
