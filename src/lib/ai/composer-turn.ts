@@ -60,9 +60,10 @@ export type ComposerTurnResult =
 function finalizeFlowAssistantMessage(
   assistantMessage: string,
   flow: BotFlowDocument,
+  stepLimitReached: boolean,
   ...contextParts: Array<string | null | undefined>
 ): { message: string; validationSummary: string | null } {
-  const message = buildFlowCompletionReport(flow, assistantMessage, ...contextParts);
+  const message = buildFlowCompletionReport(flow, assistantMessage, ...contextParts, stepLimitReached);
   const validationSummary = formatFlowValidationSummary(validateFlowDocument(flow));
   return { message, validationSummary };
 }
@@ -200,14 +201,14 @@ async function resolveFlowComposerTurn(
     userMessage,
     ...chatHistory.map((message) => message.content),
   );
+  const stepLimitReached = generation.stepLimitReached ?? false;
   const withValidation = finalizeFlowAssistantMessage(
     generation.assistantMessage,
     flow,
+    stepLimitReached,
     userMessage,
     ...chatHistory.map((message) => message.content),
   );
-
-  const stepLimitReached = generation.stepLimitReached ?? false;
   const assistantMeta = stepLimitReached ? { stepLimitReached: true as const } : undefined;
 
   return {
@@ -266,10 +267,9 @@ export async function resolveCreateComposerTurn(input: {
     createBuildPlanCollectingCallbacks(callbacks);
 
   const generation = await generateFlowFromPrompt(prompt, wrappedCallbacks, input.projectId);
-  const flow = enrichGeneratedFlow(generation.flow, prompt);
-  const withValidation = finalizeFlowAssistantMessage(generation.assistantMessage, flow, prompt);
-
   const stepLimitReached = generation.stepLimitReached ?? false;
+  const flow = enrichGeneratedFlow(generation.flow, prompt);
+  const withValidation = finalizeFlowAssistantMessage(generation.assistantMessage, flow, stepLimitReached, prompt);
   const assistantMeta = stepLimitReached ? { stepLimitReached: true as const } : undefined;
   const buildPlan = getCollectedBuildPlan();
   const messages: ProjectChatMessage[] = [

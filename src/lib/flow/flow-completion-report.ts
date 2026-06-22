@@ -93,26 +93,36 @@ function describeFlowStructure(flow: BotFlowDocument): string[] {
 export function buildFlowCompletionReport(
   flow: BotFlowDocument,
   baseMessage: string,
-  ...contextParts: Array<string | null | undefined>
+  ...contextParts: Array<string | null | undefined | boolean>
 ): string {
-  const parts: string[] = [];
+  // Последний аргумент может быть флагом stepLimitReached (boolean).
+  const lastArg = contextParts[contextParts.length - 1];
+  const stepLimitReached = lastArg === true || lastArg === false ? (lastArg as boolean) : false;
+  const parts = contextParts.filter((p): p is string | null | undefined => typeof p !== "boolean");
+
+  const lines: string[] = [];
   const intro = baseMessage.trim() || "Сценарий собран на холсте.";
-  parts.push(intro);
+  lines.push(intro);
 
   const structure = describeFlowStructure(flow);
   if (structure.length > 0) {
-    parts.push("", "## Что на холсте", "");
+    lines.push("", "## Что на холсте", "");
     for (const line of structure) {
-      parts.push(`- ${line}`);
+      lines.push(`- ${line}`);
     }
   }
 
-  const checklist = buildUserSecretsChecklist(flow, ...contextParts);
+  // Не показываем инструкции по запуску, если схема собрана частично.
+  if (stepLimitReached) {
+    return lines.join("\n");
+  }
 
-  parts.push("", "## Перед запуском", "");
+  const checklist = buildUserSecretsChecklist(flow, ...parts);
+
+  lines.push("", "## Перед запуском", "");
 
   if (checklist.items.length > 0) {
-    parts.push(
+    lines.push(
       "Сценарий готов, но бот **не заработает полностью**, пока не заполните ключи.",
       "",
       "1. Откройте **Настройки проекта** (иконка шестерёнки на холсте).",
@@ -122,24 +132,24 @@ export function buildFlowCompletionReport(
     );
 
     for (const item of checklist.items) {
-      parts.push(`- **${item.label}** — ${item.description}`);
-      parts.push(`  - Где взять: ${item.howToGet}`);
+      lines.push(`- **${item.label}** — ${item.description}`);
+      lines.push(`  - Где взять: ${item.howToGet}`);
     }
 
     if (checklist.notes.length > 0) {
-      parts.push("", "**На заметку:**");
+      lines.push("", "**На заметку:**");
       for (const note of checklist.notes) {
-        parts.push(`- ${note}`);
+        lines.push(`- ${note}`);
       }
     }
 
-    parts.push("", "4. Нажмите **Запустить** на холсте.");
+    lines.push("", "4. Нажмите **Запустить** на холсте.");
   } else {
-    parts.push(
+    lines.push(
       "1. Откройте **Настройки проекта → Бот** и укажите токен от @BotFather.",
       "2. Нажмите **Запустить** на холсте.",
     );
   }
 
-  return parts.join("\n");
+  return lines.join("\n");
 }
