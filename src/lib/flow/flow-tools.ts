@@ -270,7 +270,8 @@ export function addNode(
 export function deleteNode(doc: BotFlowDocument, nodeId: string): FlowToolResult {
   const target = doc.nodes.find((node) => node.id === nodeId);
   if (!target) {
-    return { ok: false, error: `Узел ${nodeId} не найден` };
+    const hint = doc.nodes.length > 0 ? ` Существующие id: ${doc.nodes.map((n) => n.id).join(", ")}` : "";
+    return { ok: false, error: `Узел "${nodeId}" не найден.${hint}` };
   }
 
   const nodes = doc.nodes.filter((node) => node.id !== nodeId);
@@ -293,7 +294,8 @@ export function updateNode(
 ): FlowToolResult {
   const current = doc.nodes.find((node) => node.id === nodeId);
   if (!current) {
-    return { ok: false, error: `Узел ${nodeId} не найден` };
+    const hint = doc.nodes.length > 0 ? ` Существующие id: ${doc.nodes.map((n) => n.id).join(", ")}` : "";
+    return { ok: false, error: `Узел "${nodeId}" не найден.${hint}` };
   }
 
   const mergedData = {
@@ -362,14 +364,19 @@ function resolveButtonHandle(
 }
 
 export function connectNodes(doc: BotFlowDocument, args: ConnectArgs): FlowToolResult {
+  const nodeIdHint = () =>
+    doc.nodes.length > 0
+      ? ` Существующие id: ${doc.nodes.map((n) => n.id).join(", ")}`
+      : " Узлов нет.";
+
   const sourceNode = doc.nodes.find((node) => node.id === args.source);
   if (!sourceNode) {
-    return { ok: false, error: `Узел-источник ${args.source} не найден` };
+    return { ok: false, error: `Узел-источник "${args.source}" не найден.${nodeIdHint()}` };
   }
 
   const targetNode = doc.nodes.find((node) => node.id === args.target);
   if (!targetNode) {
-    return { ok: false, error: `Узел-цель ${args.target} не найден` };
+    return { ok: false, error: `Узел-цель "${args.target}" не найден.${nodeIdHint()}` };
   }
 
   if (args.source === args.target) {

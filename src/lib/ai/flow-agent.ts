@@ -137,7 +137,7 @@ const DOC_TOOLS: ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "add_node",
-      description: `Создать узел и (опционально) подключить его после узла afterNodeId по ветке branch. ${NODE_DATA_HINT}`,
+      description: `Создать узел и (опционально) подключить его после узла afterNodeId по ветке branch. ${NODE_DATA_HINT}\nГруппы типов: [НАВИГАЦИЯ/ВЕТВЛЕНИЕ] message, condition, jump — для экранов, меню и переходов. [СБОР ДАННЫХ] choice, form, wait_input — только для вопросов к пользователю. [ДЕЙСТВИЯ] save_record, admin_notify, http_request, ai_reply, set_variable. [ВХОД] trigger.`,
       parameters: {
         type: "object",
         properties: {
@@ -705,6 +705,11 @@ export async function runFlowAgent(input: {
   let correctionRounds = 0;
   let plan: PlanItem[] = [];
 
+  // P1: stuck detection
+  let iterationsWithoutChange = 0;
+  let lastErrorTool = "";
+  let consecutiveSameToolErrors = 0;
+
   const telemetrySteps: TelemetryStep[] = [];
   const runStartedAt = Date.now();
 
@@ -738,6 +743,17 @@ export async function runFlowAgent(input: {
       messageCount: messages.length,
     });
 
+    // P1: stuck detection — нет изменений 4+ итерации подряд
+    if (iteration > 0 && iterationsWithoutChange >= 4) {
+      const structural = structuralBlockingSummary(doc);
+      const stuckHint = structural
+        ? `Проблемы, которые тебя блокируют:\n${structural}\n\nДля каждой: выясни корень, выбери другой инструмент или другой подход. Не повторяй упавший вызов без изменений.`
+        : `Схема не меняется ${iterationsWithoutChange} итерации подряд — возможно, ты забыл что-то сделать. Проверь план, вызови list_nodes и продолжай строить.`;
+      flowAgentWarn("stuck detected", { iteration, iterationsWithoutChange, hasStructural: !!structural });
+      messages.push({ role: "user", content: `⚠️ СТАГНАЦИЯ:\n${stuckHint}` });
+      iterationsWithoutChange = 0; // даём шанс после инъекции
+    }
+
     // Периодическое переинъектирование снимка — модель не теряет фокус на длинных сессиях.
     if (iteration > 0 && iteration % STATE_REGROUND_EVERY === 0) {
       // Прореживаем старые tool-exchanges — актуальное состояние уже в снимке ниже.
@@ -746,9 +762,17 @@ export async function runFlowAgent(input: {
 
       const progress = buildProgressSummary(doc, plan, instruction);
       const checklist = buildPlanChecklist(plan);
+
+      // P2: budget awareness
+      const remainingSteps = MAX_STEPS - iteration;
+      const budgetLine =
+        remainingSteps <= 10
+          ? `⚠️ БЮДЖЕТ ШАГОВ: осталось ${remainingSteps} из ${MAX_STEPS}. НЕ начинай новых крупных задач — достраивай текущее, исправь ошибки и вызывай finish.`
+          : `Бюджет: использовано ${iteration}/${MAX_STEPS} шагов, осталось ${remainingSteps}.`;
+
       messages.push({
         role: "user",
-        content: `=== СНИМОК ПРОГРЕССА ===\n${progress}\n\nТекущая схема:\n${buildStateDigest(doc)}${
+        content: `=== СНИМОК ПРОГРЕССА ===\n${progress}\n${budgetLine}\n\nТекущая схема:\n${buildStateDigest(doc)}${
           checklist ? `\n\n${checklist}` : ""
         }\n\nПродолжай по плану; не вызывай finish, пока есть невыполненные пункты или структурные проблемы.`,
       });
@@ -912,12 +936,18 @@ export async function runFlowAgent(input: {
       if (outcome.changed) {
         doc = outcome.doc;
         docChanged = true;
+        // P1: сброс счётчиков застревания при успехе
+        lastErrorTool = "";
+        consecutiveSameToolErrors = 0;
         flowAgentLog("tool ok", {
           step: iteration + 1,
           tool: name,
           summary: outcome.content.split("\n")[0],
         });
         telemetrySteps.push({ stepIndex: iteration, toolName: name, outcome: "ok", iterDurMs: Date.now() - stepStartedAt });
+        // P3: добавляем краткое состояние графа после каждого изменения
+        const stateLine = `[Граф: ${doc.nodes.length} уз., ${doc.edges.length} св.]`;
+        messages.push({ role: "tool", tool_call_id: call.id, content: `${outcome.content}\n${stateLine}` });
       } else {
         flowAgentWarn("tool error", {
           step: iteration + 1,
@@ -925,9 +955,21 @@ export async function runFlowAgent(input: {
           args: summarizeToolArgs(name, args),
           error: outcome.content,
         });
+        // P1: отслеживаем повторные ошибки одного инструмента
+        if (name === lastErrorTool) {
+          consecutiveSameToolErrors += 1;
+        } else {
+          lastErrorTool = name;
+          consecutiveSameToolErrors = 1;
+        }
         telemetrySteps.push({ stepIndex: iteration, toolName: name, outcome: "error", errorText: outcome.content.slice(0, 300), iterDurMs: Date.now() - stepStartedAt });
+        // P4: структурированная рефлексия при ошибке
+        const reflectionHint =
+          consecutiveSameToolErrors >= 3
+            ? `\n\n⛔ Этот вызов упал уже ${consecutiveSameToolErrors} раза подряд. Используй другой инструмент или другой подход — повтор того же вызова не поможет.`
+            : `\n\nНе повторяй тот же вызов без изменений — выясни причину и выбери другой подход.`;
+        messages.push({ role: "tool", tool_call_id: call.id, content: `Ошибка: ${outcome.content}${reflectionHint}` });
       }
-      messages.push({ role: "tool", tool_call_id: call.id, content: outcome.content });
     }
 
     if (docChanged) {
@@ -940,6 +982,9 @@ export async function runFlowAgent(input: {
         edgeCount: doc.edges.length,
       });
       callbacks?.onPartialFlow?.(doc, doc.nodes.length);
+      iterationsWithoutChange = 0;
+    } else if (!finished) {
+      iterationsWithoutChange += 1;
     }
 
     if (finished) {
