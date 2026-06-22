@@ -374,8 +374,8 @@ function findUnreachableNodes(doc: BotFlowDocument): FlowValidationIssue[] {
   );
 
   return unreachable.map((node) => ({
-    severity: "warning" as const,
-    message: "Узел недостижим из триггеров — он не выполнится",
+    severity: "error" as const,
+    message: "Узел недостижим из триггеров — добавь входящую связь или удали узел",
     nodeLabel: getNodeLabel(node),
   }));
 }

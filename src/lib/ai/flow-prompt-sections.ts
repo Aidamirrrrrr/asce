@@ -19,9 +19,9 @@ export const NODE_TYPES_SECTION = `Доступные типы узлов:
 8. admin_notify — отправить уведомление в заданный чат (например админу/в группу заявок). Поля: label, chatId (ID чата или шаблон, по умолчанию "{{secret.ADMIN_CHAT_ID}}"), text (поддерживает {{var.*}} / {{secret.*}}). Линейный узел (ветка next). Используй для «уведомить менеджера о заявке», «оповестить админа»
 9. json_extract — извлечь значение по пути из JSON-переменной. ПРЕДПОЧИТАЙ поле extractions на http_request вместо отдельного json_extract.
 10. save_record — узел «Запись»: сохранить данные (запись, лид, заказ, бронь) во ВСТРОЕННОЕ хранилище проекта. Поля: label, collection (латиница: "appointments", "leads", "orders"), fields (массив {key, value}; value поддерживает {{var.*}} / {{nickname}}). Линейный узел. Владелец видит записи в чате проекта, БЕЗ внешнего API
-11. choice — ★ ГЛАВНЫЙ узел для выбора из вариантов. Показывает inline-кнопки → сохраняет выбор → ОДИН выход next. Поля: label, prompt (текст вопроса), variableKey (куда сохранить выбор, snake_case без var.), options (массив {text, value?}). ИСПОЛЬЗУЙ вместо паттерна message + N×set_variable. Примеры: выбор услуги, мастера, дня недели, времени, города.
+11. choice — ★ СБОР ОДНОГО ОТВЕТА (НЕ навигация). Показывает inline-кнопки → сохраняет ОДИН выбор в переменную → ОДИН фиксированный выход next. Поля: label, prompt (текст вопроса), variableKey (куда сохранить выбор, snake_case без var.), options (массив {text, value?}, value — ASCII-латиница). ИСПОЛЬЗУЙ для: выбор услуги/мастера/даты/времени/города. ⛔ НЕЛЬЗЯ использовать для навигационных меню (FAQ, разделы, «Что хотите сделать?») — при нажатии любой кнопки выполнение ВСЕГДА идёт в одну и ту же ноду-next; остальные ноды станут недостижимыми. Для меню/навигации — только message с inline-кнопками.
 12. jump — переход (goto) к другой ноде. Поля: label, targetNodeId (id ноды назначения из list_nodes). Не имеет исходящих рёбер на холсте — выполнение переходит по targetNodeId. Используй для кнопки «Назад в меню» и циклов. ВАЖНО: сначала list_nodes → возьми нужный id → создай jump с этим targetNodeId.
-13. form — ★ ГЛАВНЫЙ узел для сбора нескольких полей подряд. Задаёт вопросы последовательно, сохраняет ответы в переменные, ОДИН выход next. Поля: label, questions (массив {prompt, variableKey, type: "text"|"phone"|"email"|"contact"}). ИСПОЛЬЗУЙ вместо цепочки wait_input-нод. Пример: сбор имени+телефона+почты = одна form-нода вместо 6 нод.`;
+13. form — ★ СБОР НЕСКОЛЬКИХ ПОЛЕЙ подряд (НЕ навигация). Задаёт вопросы последовательно, сохраняет ответы в переменные, ОДИН выход next. Поля: label, questions (массив {prompt, variableKey, type: "text"|"phone"|"email"|"contact"}). ИСПОЛЬЗУЙ вместо цепочки wait_input-нод. Пример: сбор имени+телефона+почты = одна form-нода вместо 6 нод.`;
 
 export const CONDITION_SECTION = `Поля condition:
 - label (string), matchMode ("all" | "any")
@@ -113,6 +113,11 @@ export const KEYBOARD_SECTION = `keyboard:
 - { "type": "remove" } — убрать reply-клавиатуру у пользователя
 Текст кнопок — до 64 символов. url/web_app/copy_text/switch_inline — без ветки на холсте.
 
+⛔ АНТИ-ПАТТЕРН (НЕ ДЕЛАТЬ): choice для навигационного меню:
+  choice(variableKey:"section", options:["Услуги","Контакты","Помощь"]) → message(Услуги)
+  ← НЕВЕРНО: choice имеет ОДИН next, все нажатия ведут в одну ноду; Контакты и Помощь останутся недостижимыми.
+✅ ПРАВИЛЬНО — message с inline-кнопками + connect_nodes для каждой:
+
 ПРИМЕР — меню «Услуги / Контакты / Помощь» (обязательный порядок):
   1) add_node("message", data:{text:"Выберите раздел:", keyboard:{type:"inline",buttons:[["Услуги"],["Контакты"],["Помощь"]]}}) → id: msg_menu
   2) add_node("message", data:{text:"Описание услуг..."}) → id: msg_services
@@ -125,9 +130,9 @@ export const KEYBOARD_SECTION = `keyboard:
 
 // Few-shot библиотека архетипов: подсказывает модели готовые паттерны под частые задачи.
 export const TEMPLATES_SECTION = `Готовые шаблоны (архетипы) — выбирай подходящий и адаптируй под задачу:
-- FAQ/справка: trigger /start → message-меню с inline-кнопками тем → по узлу message на каждую тему (+ кнопка «Назад» в меню); опц. trigger any_message → ai_reply
+- FAQ/справка: trigger /start → message-меню с inline-кнопками тем → ОТДЕЛЬНЫЙ узел message на каждую тему (+ кнопка «Назад» в меню); ⛔ НЕ использовать choice для FAQ — он не ветвит, а собирает данные; опц. trigger any_message → ai_reply
 - Поддержка: trigger /start → message → ai_reply (systemPrompt с ролью оператора); + admin_notify, если нужно пересылать обращения
-- Запись на услугу / лид-форма: trigger /start → message → wait_input (имя) → message → wait_input (телефон) → save_record (label «Запись», collection "appointments", fields name/phone) → admin_notify → message «Спасибо». Сбор данных идёт в save_record, НЕ в выдуманный http_request
+- Запись на услугу / лид-форма: trigger /start → message приветствие → choice (выбор услуги, variableKey:"service") → choice (выбор мастера, variableKey:"master") → choice (выбор времени, variableKey:"time") → form (сбор имени+телефона) → save_record (collection "appointments", fields: service/master/time/name/phone) → admin_notify → message «Запись оформлена». ⛔ НЕ использовать цепочки wait_input для выбора из вариантов — только choice
 - Квиз: trigger /start → message-вопрос с inline-вариантами → по ветке message с реакцией → следующий вопрос → итог
 - Гейт по подписке: condition chat_member (yes → контент) (no → message с url-кнопкой на канал + «Я подписался» обратно в condition)
 - Магазин/заказ без онлайн-оплаты: message-каталог → выбор → wait_input (контакт/адрес) → save_record (collection "orders") → admin_notify (заказ менеджеру) → message «Заказ принят». НЕ выдумывай API магазина
