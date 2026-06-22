@@ -1,7 +1,9 @@
-import { runFlowAgent } from "@/lib/ai/flow-agent";
 import { buildLlmServiceErrorMessage, isLlmServiceError } from "@/lib/ai/llm-retry";
-import { createDefaultFlow, createEmptyFlow } from "@/lib/flow/default-flow";
+import { jsonCreateFlow, jsonRefineFlow } from "@/lib/ai/flow-json-generator";
+import { repairFlowStructure } from "@/lib/ai/flow-repair";
+import { createDefaultFlow } from "@/lib/flow/default-flow";
 import type { BotFlowDocument } from "@/lib/flow/flow-schema";
+import { validateFlowDocument } from "@/lib/flow/validate-flow-document";
 import type { ProjectChatMessage } from "@/lib/projects";
 
 export type FlowStreamCallbacks = {
@@ -19,11 +21,7 @@ export type FlowGenerationResult = {
   stepLimitReached?: boolean;
 };
 
-/** Последний резерв, если агент не смог собрать схему (например, шлюз без function-calling). */
-function buildFallbackFlow(prompt: string): {
-  flow: BotFlowDocument;
-  assistantMessage: string;
-} {
+function buildFallbackFlow(prompt: string): { flow: BotFlowDocument; assistantMessage: string } {
   const flow = createDefaultFlow();
 
   for (const node of flow.nodes) {
@@ -42,31 +40,17 @@ function buildFallbackFlow(prompt: string): {
   return {
     flow,
     assistantMessage:
-      "Не удалось полностью сгенерировать сценарий через AI — применён базовый шаблон. Отредактируйте блоки на холсте.",
+      "Не удалось сгенерировать сценарий через AI — применён базовый шаблон. Отредактируйте блоки на холсте.",
   };
 }
 
-function buildHistoryContext(chatHistory: ProjectChatMessage[]): string {
-  const snippet = chatHistory
-    .slice(-6)
-    .map(
-      (message) => `${message.role === "user" ? "Пользователь" : "Ассистент"}: ${message.content}`,
-    )
-    .join("\n");
-
-  return snippet ? `История чата:\n${snippet}\n\n` : "";
-}
-
-function handleFlowAgentError(error: unknown, prompt: string): FlowGenerationResult {
+function handleFlowError(error: unknown, prompt: string): FlowGenerationResult {
   if (isLlmServiceError(error)) {
     throw new Error(buildLlmServiceErrorMessage(error));
   }
 
   const fallback = buildFallbackFlow(prompt);
-  return {
-    flow: fallback.flow,
-    assistantMessage: fallback.assistantMessage,
-  };
+  return { flow: fallback.flow, assistantMessage: fallback.assistantMessage };
 }
 
 export async function generateFlowFromPrompt(
@@ -77,15 +61,26 @@ export async function generateFlowFromPrompt(
   const trimmed = prompt.trim();
 
   try {
-    return await runFlowAgent({
-      mode: "create",
-      baseDoc: createEmptyFlow(),
-      instruction: trimmed,
-      callbacks,
-      projectId,
-    });
+    // Phase 1: JSON generation (one LLM call, ~3-5s)
+    const generated = await jsonCreateFlow(trimmed);
+    callbacks?.onPartialFlow?.(generated.flow, generated.flow.nodes.length);
+
+    // Phase 2: targeted repair (only if validation errors exist)
+    const errors = validateFlowDocument(generated.flow);
+    const structuralErrors = errors.filter((i) => i.severity === "error");
+    const flow =
+      structuralErrors.length > 0
+        ? await repairFlowStructure(generated.flow, structuralErrors)
+        : generated.flow;
+
+    return {
+      flow,
+      name: generated.name,
+      assistantMessage: generated.assistantMessage,
+      stepLimitReached: false,
+    };
   } catch (error) {
-    return handleFlowAgentError(error, trimmed);
+    return handleFlowError(error, trimmed);
   }
 }
 
@@ -103,17 +98,26 @@ export async function refineFlowFromInstruction({
   projectId?: string;
 }): Promise<FlowGenerationResult> {
   const trimmed = instruction.trim();
-  const instructionWithContext = `${buildHistoryContext(chatHistory)}${trimmed}`;
 
   try {
-    return await runFlowAgent({
-      mode: "refine",
-      baseDoc: currentFlow,
-      instruction: instructionWithContext,
-      callbacks,
-      projectId,
-    });
+    // Phase 1: JSON delta generation (one LLM call)
+    const refined = await jsonRefineFlow(currentFlow, trimmed, chatHistory);
+    callbacks?.onPartialFlow?.(refined.flow, refined.flow.nodes.length);
+
+    // Phase 2: targeted repair if structural errors
+    const errors = validateFlowDocument(refined.flow);
+    const structuralErrors = errors.filter((i) => i.severity === "error");
+    const flow =
+      structuralErrors.length > 0
+        ? await repairFlowStructure(refined.flow, structuralErrors)
+        : refined.flow;
+
+    return {
+      flow,
+      assistantMessage: refined.assistantMessage,
+      stepLimitReached: false,
+    };
   } catch (error) {
-    return handleFlowAgentError(error, trimmed);
+    return handleFlowError(error, trimmed);
   }
 }
