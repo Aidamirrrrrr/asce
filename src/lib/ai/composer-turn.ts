@@ -192,6 +192,7 @@ async function resolveFlowComposerTurn(
     instruction: userMessage,
     chatHistory,
     callbacks: wrappedCallbacks,
+    projectId: input.projectId,
   });
 
   const flow = enrichGeneratedFlow(
@@ -258,12 +259,13 @@ export async function resolveComposerTurn(
 export async function resolveCreateComposerTurn(input: {
   prompt: string;
   callbacks?: FlowStreamCallbacks;
+  projectId?: string;
 }): Promise<Extract<ComposerTurnResult, { kind: "flow" }>> {
   const { prompt, callbacks } = input;
   const { callbacks: wrappedCallbacks, getCollectedBuildPlan } =
     createBuildPlanCollectingCallbacks(callbacks);
 
-  const generation = await generateFlowFromPrompt(prompt, wrappedCallbacks);
+  const generation = await generateFlowFromPrompt(prompt, wrappedCallbacks, input.projectId);
   const flow = enrichGeneratedFlow(generation.flow, prompt);
   const withValidation = finalizeFlowAssistantMessage(generation.assistantMessage, flow, prompt);
 

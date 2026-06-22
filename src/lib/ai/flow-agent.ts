@@ -6,6 +6,7 @@ import type {
 import { runChatToolStep } from "@/lib/ai/ai-client";
 import { FLOW_AGENT_MAX_STEPS } from "@/lib/ai/flow-agent-continue";
 import { flowAgentLog, flowAgentWarn } from "@/lib/ai/flow-agent-log";
+import { saveFlowAgentRun, type TelemetryStep } from "@/lib/ai/flow-agent-telemetry";
 import type { FlowStreamCallbacks } from "@/lib/ai/flow-generator";
 import {
   CONDITION_SECTION,
@@ -686,12 +687,13 @@ export async function runFlowAgent(input: {
   baseDoc: BotFlowDocument;
   instruction: string;
   callbacks?: FlowStreamCallbacks;
+  projectId?: string;
   /** Точка внедрения для тестов; по умолчанию — реальный вызов ИИ-провайдера. */
   step?: FlowAgentStepFn;
   /** Финишная фаза достраивания висящих веток субагентами (по умолчанию включена). */
   useSubagents?: boolean;
 }): Promise<FlowAgentResult> {
-  const { mode, baseDoc, instruction, callbacks } = input;
+  const { mode, baseDoc, instruction, callbacks, projectId } = input;
   const step = input.step ?? runChatToolStep;
 
   let doc: BotFlowDocument = baseDoc;
@@ -700,6 +702,9 @@ export async function runFlowAgent(input: {
   let usedTool = false;
   let correctionRounds = 0;
   let plan: PlanItem[] = [];
+
+  const telemetrySteps: TelemetryStep[] = [];
+  const runStartedAt = Date.now();
 
   const systemPrompt =
     mode === "create" ? FLOW_AGENT_CREATE_SYSTEM_PROMPT : FLOW_AGENT_REFINE_SYSTEM_PROMPT;
@@ -831,6 +836,7 @@ export async function runFlowAgent(input: {
           flowName = args.name.trim();
         }
         flowAgentLog("tool set_plan", { step: iteration + 1, items: items.length });
+        telemetrySteps.push({ stepIndex: iteration, toolName: name, outcome: "meta", iterDurMs: Date.now() - stepStartedAt });
         callbacks?.onPlan?.(plan.map((item) => item.text));
         messages.push({
           role: "tool",
@@ -846,6 +852,7 @@ export async function runFlowAgent(input: {
           plan[index].done = true;
         }
         const remaining = plan.filter((item) => !item.done).length;
+        telemetrySteps.push({ stepIndex: iteration, toolName: name, outcome: "meta", iterDurMs: Date.now() - stepStartedAt });
         callbacks?.onPlanProgress?.(
           plan.flatMap((item, itemIndex) => (item.done ? [itemIndex] : [])),
         );
@@ -859,6 +866,7 @@ export async function runFlowAgent(input: {
 
       if (name === "get_issues") {
         const todo = buildBlockingTodo(doc, plan);
+        telemetrySteps.push({ stepIndex: iteration, toolName: name, outcome: "meta", iterDurMs: Date.now() - stepStartedAt });
         messages.push({
           role: "tool",
           tool_call_id: call.id,
@@ -870,6 +878,7 @@ export async function runFlowAgent(input: {
       if (name === "think") {
         const reasoning = typeof args.reasoning === "string" ? args.reasoning.trim() : "";
         flowAgentLog("tool think", { step: iteration + 1, reasoningLength: reasoning.length });
+        telemetrySteps.push({ stepIndex: iteration, toolName: name, outcome: "meta", iterDurMs: Date.now() - stepStartedAt });
         messages.push({
           role: "tool",
           tool_call_id: call.id,
@@ -891,6 +900,7 @@ export async function runFlowAgent(input: {
           hasName: Boolean(flowName),
           messageLength: assistantMessage.length,
         });
+        telemetrySteps.push({ stepIndex: iteration, toolName: name, outcome: "meta", iterDurMs: Date.now() - stepStartedAt });
         messages.push({ role: "tool", tool_call_id: call.id, content: "ok" });
         continue;
       }
@@ -905,6 +915,7 @@ export async function runFlowAgent(input: {
           tool: name,
           summary: outcome.content.split("\n")[0],
         });
+        telemetrySteps.push({ stepIndex: iteration, toolName: name, outcome: "ok", iterDurMs: Date.now() - stepStartedAt });
       } else {
         flowAgentWarn("tool error", {
           step: iteration + 1,
@@ -912,6 +923,7 @@ export async function runFlowAgent(input: {
           args: summarizeToolArgs(name, args),
           error: outcome.content,
         });
+        telemetrySteps.push({ stepIndex: iteration, toolName: name, outcome: "error", errorText: outcome.content.slice(0, 300), iterDurMs: Date.now() - stepStartedAt });
       }
       messages.push({ role: "tool", tool_call_id: call.id, content: outcome.content });
     }
@@ -979,6 +991,20 @@ export async function runFlowAgent(input: {
     edgeCount: doc.edges.length,
     assistantMessageLength: assistantMessage.length,
   });
+
+  saveFlowAgentRun(
+    {
+      projectId,
+      mode,
+      instruction,
+      exitReason,
+      totalSteps: telemetrySteps.length,
+      nodeCountStart: baseDoc.nodes.length,
+      nodeCountEnd: doc.nodes.length,
+      durationMs: Date.now() - runStartedAt,
+    },
+    telemetrySteps,
+  );
 
   return {
     flow: withLayout(doc),

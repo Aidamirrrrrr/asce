@@ -250,6 +250,41 @@ model ProjectRecord {
   @@index([projectId, collection, createdAt])
 }
 
+/// Один запуск агента сборки сценария.
+model FlowAgentRun {
+  id             String          @id @default(cuid())
+  projectId      String?
+  mode           String          // "create" | "refine"
+  instruction    String          // первые 800 символов запроса
+  exitReason     String          // "finished" | "max_steps_reached" | "no_tool_calls" | "llm_step_error_with_progress" | ...
+  totalSteps     Int
+  nodeCountStart Int
+  nodeCountEnd   Int
+  durationMs     Int
+  createdAt      DateTime        @default(now())
+  steps          FlowAgentStep[]
+
+  @@index([createdAt])
+  @@index([exitReason, createdAt])
+  @@index([projectId, createdAt])
+}
+
+/// Один вызов инструмента внутри запуска агента.
+model FlowAgentStep {
+  id           String       @id @default(cuid())
+  runId        String
+  run          FlowAgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  stepIndex    Int          // номер итерации (0-based)
+  toolName     String
+  outcome      String       // "ok" | "error" | "meta"
+  errorText    String?      // первые 300 символов ответа при outcome=error
+  iterDurMs    Int          // время LLM-вызова этой итерации (мс)
+  createdAt    DateTime     @default(now())
+
+  @@index([runId])
+  @@index([toolName, outcome])
+}
+
 model ProcessedPayment {
   id        String   @id @default(cuid())
   projectId String

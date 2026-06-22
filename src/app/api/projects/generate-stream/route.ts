@@ -83,6 +83,7 @@ export async function POST(request: Request) {
               () =>
                 resolveCreateComposerTurn({
                   prompt,
+                  projectId: draftProject.id,
                   callbacks: {
                     onPartialFlow: (flow, nodeCount) => {
                       send({ type: "flow", flow, nodeCount });

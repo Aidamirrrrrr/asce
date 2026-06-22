@@ -72,6 +72,7 @@ function handleFlowAgentError(error: unknown, prompt: string): FlowGenerationRes
 export async function generateFlowFromPrompt(
   prompt: string,
   callbacks?: FlowStreamCallbacks,
+  projectId?: string,
 ): Promise<FlowGenerationResult> {
   const trimmed = prompt.trim();
 
@@ -81,6 +82,7 @@ export async function generateFlowFromPrompt(
       baseDoc: createEmptyFlow(),
       instruction: trimmed,
       callbacks,
+      projectId,
     });
   } catch (error) {
     return handleFlowAgentError(error, trimmed);
@@ -92,11 +94,13 @@ export async function refineFlowFromInstruction({
   instruction,
   chatHistory = [],
   callbacks,
+  projectId,
 }: {
   currentFlow: BotFlowDocument;
   instruction: string;
   chatHistory?: ProjectChatMessage[];
   callbacks?: FlowStreamCallbacks;
+  projectId?: string;
 }): Promise<FlowGenerationResult> {
   const trimmed = instruction.trim();
   const instructionWithContext = `${buildHistoryContext(chatHistory)}${trimmed}`;
@@ -107,6 +111,7 @@ export async function refineFlowFromInstruction({
       baseDoc: currentFlow,
       instruction: instructionWithContext,
       callbacks,
+      projectId,
     });
   } catch (error) {
     return handleFlowAgentError(error, trimmed);
