@@ -45,18 +45,27 @@ const CREATE_SYSTEM_PROMPT = `Ты — генератор схем Telegram-бо
   "assistantMessage": "Что построено: 1-2 предложения по-русски",
   "nodes": [
     { "id": "start", "type": "trigger", "label": "Старт", "command": "/start", "triggerType": "command" },
+    { "id": "welcome", "type": "message", "label": "Приветствие", "text": "...", "keyboard": { "type": "inline", "buttons": [["Записаться"]] } },
     ...
+  ],
+  "edges": [
+    { "source": "start", "target": "welcome" },
+    { "source": "welcome", "target": "booking", "buttonText": "Записаться" },
+    { "source": "cond", "target": "ok", "branch": "yes" },
+    { "source": "cond", "target": "fail", "branch": "no" },
+    { "source": "http", "target": "next_step", "branch": "success" },
+    { "source": "http", "target": "error_msg", "branch": "error" }
   ]
 }
 
-ID узлов: уникальный snake_case, латиница (start, main_menu, faq_1, booking_form).
-
-КРИТИЧНО — порядок узлов:
-- Узлы располагай в ТОПОЛОГИЧЕСКОМ ПОРЯДКЕ: сначала trigger, потом первый узел, потом его потомки.
-- После message с inline-кнопками сразу ставь целевые узлы В ТОМ ЖЕ ПОРЯДКЕ что кнопки.
-  Пример: menu (кнопки: FAQ, Запись) → faq → booking
-- Системе этот порядок нужен для автоматического построения рёбер.
-
+Правила edges:
+- КАЖДАЯ callback-кнопка message ОБЯЗАНА иметь edge с точным "buttonText" (текст кнопки слово в слово).
+- Линейные узлы (message без кнопок, choice, form, wait_input, save_record, admin_notify, set_variable, ai_reply) — edge без branch и без buttonText.
+- condition → branch "yes" и branch "no".
+- http_request → branch "success" и branch "error".
+- jump — НЕ добавляй edge (он использует targetNodeId внутри).
+- choice/form — только один edge с target = следующий шаг сценария.
+- Все node id уникальны, snake_case, латиница.
 ${NO_EMOJI_RULE}.
 
 ${NODE_TYPES_SECTION}
@@ -110,12 +119,14 @@ ${KEYBOARD_SECTION}`;
 // Types
 // ---------------------------------------------------------------------------
 
-type RefineDeltaEdge = {
+type ExplicitEdge = {
   source: string;
   target: string;
   buttonText?: string;
   branch?: "yes" | "no" | "success" | "error";
 };
+
+type RefineDeltaEdge = ExplicitEdge;
 
 type RefineDeltaUpdateNode = { id: string } & Partial<GeneratedFlowNodeSpec>;
 
@@ -158,6 +169,37 @@ export function buildFlowDigest(doc: BotFlowDocument): string {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function parseExplicitEdges(raw: string): ExplicitEdge[] {
+  try {
+    const parsed = JSON.parse(extractJsonFromAiResponse(raw)) as Record<string, unknown>;
+    if (!Array.isArray(parsed.edges)) return [];
+    return (parsed.edges as ExplicitEdge[]).filter(
+      (e) => e && typeof e.source === "string" && typeof e.target === "string",
+    );
+  } catch {
+    return [];
+  }
+}
+
+function applyExplicitEdges(doc: BotFlowDocument, edges: ExplicitEdge[]): BotFlowDocument {
+  // Start from nodes-only (no heuristic edges)
+  let current: BotFlowDocument = { ...doc, edges: [] };
+  for (const edge of edges) {
+    const result = connectNodes(current, {
+      source: edge.source,
+      target: edge.target,
+      ...(edge.buttonText ? { buttonText: edge.buttonText } : {}),
+      ...(edge.branch ? { branch: edge.branch } : {}),
+    });
+    if (result.ok) current = result.doc;
+  }
+  return current;
+}
+
+// ---------------------------------------------------------------------------
 // Create
 // ---------------------------------------------------------------------------
 
@@ -167,8 +209,17 @@ export async function jsonCreateFlow(prompt: string): Promise<{
   assistantMessage: string;
 }> {
   const raw = await generateAiReply(CREATE_SYSTEM_PROMPT, prompt);
+
   const spec = parseGeneratedFlowSpec(raw);
-  const flow = applyLayoutToFlowDocument(buildFlowDocument(spec));
+  const explicitEdges = parseExplicitEdges(raw);
+
+  // Build nodes (normalised, positioned) — skip heuristic edges if LLM gave explicit ones
+  let doc = buildFlowDocument(spec, { skipMinimumNodes: false });
+  if (explicitEdges.length > 0) {
+    doc = applyExplicitEdges(doc, explicitEdges);
+  }
+
+  const flow = applyLayoutToFlowDocument(doc);
 
   return {
     flow,
