@@ -12,6 +12,7 @@ import { createEmptyFlow } from "@/lib/flow/default-flow";
 import { buildFlowCompletionReport } from "@/lib/flow/flow-completion-report";
 import type { BotFlowDocument } from "@/lib/flow/flow-schema";
 import { enrichFlowWithInferredSecrets } from "@/lib/flow/secret-recipes";
+import { simulateFlow } from "@/lib/flow/simulate-flow";
 import {
   formatFlowValidationSummary,
   validateFlowDocument,
@@ -63,8 +64,17 @@ function finalizeFlowAssistantMessage(
   stepLimitReached: boolean,
   ...contextParts: Array<string | null | undefined>
 ): { message: string; validationSummary: string | null } {
-  const message = buildFlowCompletionReport(flow, assistantMessage, ...contextParts, stepLimitReached);
-  const validationSummary = formatFlowValidationSummary(validateFlowDocument(flow));
+  const message = buildFlowCompletionReport(
+    flow,
+    assistantMessage,
+    ...contextParts,
+    stepLimitReached,
+  );
+  // Сводка = статическая валидация + order-aware/цикл-находки сухого прогона.
+  const validationSummary = formatFlowValidationSummary([
+    ...validateFlowDocument(flow),
+    ...simulateFlow(flow).issues,
+  ]);
   return { message, validationSummary };
 }
 
@@ -269,7 +279,12 @@ export async function resolveCreateComposerTurn(input: {
   const generation = await generateFlowFromPrompt(prompt, wrappedCallbacks, input.projectId);
   const stepLimitReached = generation.stepLimitReached ?? false;
   const flow = enrichGeneratedFlow(generation.flow, prompt);
-  const withValidation = finalizeFlowAssistantMessage(generation.assistantMessage, flow, stepLimitReached, prompt);
+  const withValidation = finalizeFlowAssistantMessage(
+    generation.assistantMessage,
+    flow,
+    stepLimitReached,
+    prompt,
+  );
   const assistantMeta = stepLimitReached ? { stepLimitReached: true as const } : undefined;
   const buildPlan = getCollectedBuildPlan();
   const messages: ProjectChatMessage[] = [

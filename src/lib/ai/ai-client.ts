@@ -46,6 +46,15 @@ export function getAiModel(): string {
   return process.env.AI_MODEL ?? "Qwen3-Coder-Next";
 }
 
+/**
+ * Модель для генерации схем ботов. Отдельная от рантайм-модели: сборка сценария —
+ * самая «тяжёлая» задача планирования, под неё имеет смысл ставить более сильную
+ * модель (через AI_GEN_MODEL), не трогая дешёвую рантайм-модель ботов.
+ */
+export function getAiGenModel(): string {
+  return process.env.AI_GEN_MODEL ?? getAiModel();
+}
+
 function getClient(): OpenAI {
   return getAiClient();
 }
@@ -74,7 +83,9 @@ export async function runChatToolStep(
   tools: ChatCompletionTool[],
 ): Promise<ChatCompletionMessage | undefined> {
   const client = getClient();
-  const model = getAiModel();
+  // Repair — единственный потребитель tool-step; это часть сборки схемы, поэтому
+  // используем сильную gen-модель (AI_GEN_MODEL), а не дешёвую рантайм-модель.
+  const model = getAiGenModel();
   const startedAt = Date.now();
 
   flowAgentLog("llm request", {
@@ -271,6 +282,68 @@ export async function streamGenerateAiReply(
     }
     throw error;
   }
+}
+
+/**
+ * Генерация строгого JSON-ответа (для сборки/правки схем ботов).
+ *
+ * Отличия от generateAiReply, закрывающие три класса дефектов генерации:
+ *  - сильная модель (AI_GEN_MODEL) под тяжёлую задачу планирования;
+ *  - JSON-mode (response_format) — убирает markdown-обёртки и обрывы валидности JSON;
+ *  - явный max_tokens — убирает обрезку больших схем «по длине».
+ *
+ * JSON-mode включается по умолчанию; если эндпоинт его не поддерживает (HTTP 400),
+ * происходит мягкий откат на обычный запрос — текст всё равно пройдёт через
+ * extractJsonFromAiResponse у вызывающей стороны.
+ */
+export async function generateStructuredJson(
+  systemPrompt: string,
+  userMessage: string,
+): Promise<string> {
+  const client = getClient();
+  const model = getAiGenModel();
+  const maxTokens = Number(process.env.AI_GEN_MAX_TOKENS ?? "16000");
+  const temperature = Number(process.env.AI_GEN_TEMPERATURE ?? "0.2");
+  const jsonMode = (process.env.AI_JSON_MODE ?? "1") !== "0";
+
+  const baseParams: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming = {
+    model,
+    messages: [
+      { role: "system", content: `${systemPrompt}\n\n${NO_EMOJI_RULE}` },
+      { role: "user", content: userMessage },
+    ],
+    temperature: Number.isFinite(temperature) ? temperature : 0.2,
+    max_tokens: Number.isFinite(maxTokens) && maxTokens > 0 ? maxTokens : 16000,
+  };
+
+  const attempt = async (withJsonMode: boolean): Promise<ChatCompletion> =>
+    client.chat.completions.create(
+      withJsonMode ? { ...baseParams, response_format: { type: "json_object" } } : baseParams,
+    );
+
+  let response: ChatCompletion;
+  try {
+    response = await attempt(jsonMode);
+  } catch (error) {
+    // Эндпоинт не принял response_format — мягкий откат без него.
+    if (jsonMode && error instanceof OpenAI.APIError && error.status === 400) {
+      flowAgentWarn("structured json mode unsupported, falling back", {
+        message: error.message,
+      });
+      response = await attempt(false);
+    } else if (error instanceof OpenAI.APIError) {
+      throw new Error(`AI API: ${error.message}`);
+    } else {
+      throw error;
+    }
+  }
+
+  meterUsage(response);
+  const finishReason = response.choices[0]?.finish_reason ?? null;
+  if (finishReason === "length") {
+    flowAgentWarn("structured json truncated by length", { model, maxTokens });
+  }
+  return stripTextEmojis(extractMessageContent(response.choices[0]?.message?.content));
 }
 
 export async function generateAiReply(systemPrompt: string, userMessage: string): Promise<string> {

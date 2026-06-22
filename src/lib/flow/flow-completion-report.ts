@@ -1,5 +1,6 @@
 import type { BotFlowDocument, MessageNodeData, TriggerNodeData } from "@/lib/flow/flow-schema";
 import { buildUserSecretsChecklist } from "@/lib/flow/secret-recipes";
+import { formatTranscriptPreview, simulateFlow } from "@/lib/flow/simulate-flow";
 
 function collectKeyboardLabels(flow: BotFlowDocument): string[] {
   const labels = new Set<string>();
@@ -110,6 +111,12 @@ export function buildFlowCompletionReport(
     for (const line of structure) {
       lines.push(`- ${line}`);
     }
+  }
+
+  // Превью диалога «как увидит пользователь» — сухой прогон happy-path.
+  const preview = formatTranscriptPreview(simulateFlow(flow).transcript);
+  if (preview) {
+    lines.push("", preview);
   }
 
   // Не показываем инструкции по запуску, если схема собрана частично.

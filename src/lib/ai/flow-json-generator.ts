@@ -4,7 +4,7 @@
  *   jsonCreateFlow  — one LLM call → complete GeneratedFlowSpec → BotFlowDocument
  *   jsonRefineFlow  — one LLM call → delta JSON → apply atomically → BotFlowDocument
  */
-import { generateAiReply } from "@/lib/ai/ai-client";
+import { generateStructuredJson } from "@/lib/ai/ai-client";
 import {
   CONDITION_SECTION,
   KEYBOARD_SECTION,
@@ -16,20 +16,19 @@ import {
   VARIABLES_AND_MESSAGE_SECTION,
 } from "@/lib/ai/flow-prompt-sections";
 import { extractJsonFromAiResponse } from "@/lib/ai/stream-json-utils";
-import { connectNodes, deleteNode, updateNode } from "@/lib/flow/flow-tools";
 import {
   type BotFlowDocument,
   createFlowNodeId,
   sanitizeFlowDocument,
 } from "@/lib/flow/flow-schema";
+import { connectNodes, deleteNode, describeNode, updateNode } from "@/lib/flow/flow-tools";
+import { getMessageSourceHandles, normalizeMessageNodeData } from "@/lib/flow/message-node-utils";
 import {
   applyLayoutToFlowDocument,
   buildFlowDocument,
   type GeneratedFlowNodeSpec,
   parseGeneratedFlowSpec,
 } from "@/lib/flow/normalize-generated-flow";
-import { describeNode } from "@/lib/flow/flow-tools";
-import { getMessageSourceHandles, normalizeMessageNodeData } from "@/lib/flow/message-node-utils";
 import type { ProjectChatMessage } from "@/lib/projects";
 import { stripTextEmojisOptional } from "@/lib/text/strip-emojis";
 
@@ -256,7 +255,7 @@ export async function jsonCreateFlow(prompt: string): Promise<{
   name?: string;
   assistantMessage: string;
 }> {
-  const raw = await generateAiReply(CREATE_SYSTEM_PROMPT, prompt);
+  const raw = await generateStructuredJson(CREATE_SYSTEM_PROMPT, prompt);
 
   const spec = parseGeneratedFlowSpec(raw);
   const explicitEdges = parseExplicitEdges(raw);
@@ -389,7 +388,7 @@ export async function jsonRefineFlow(
     (historySnippet ? `История:\n${historySnippet}\n\n` : "") +
     `Инструкция: ${instruction}`;
 
-  const raw = await generateAiReply(REFINE_SYSTEM_PROMPT, userContent);
+  const raw = await generateStructuredJson(REFINE_SYSTEM_PROMPT, userContent);
   const delta = parseRefineDelta(raw);
 
   const flow = applyLayoutToFlowDocument(applyDeltaToDoc(currentFlow, delta));

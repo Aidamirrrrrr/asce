@@ -121,6 +121,24 @@ export function collectDeclaredVariableKeys(
         keys.add(key);
       }
     }
+
+    if (node.type === "choice" && node.data && typeof node.data === "object") {
+      const variableKey = (node.data as { variableKey?: string }).variableKey;
+      const key = normalizeVariableKey(variableKey ?? "");
+      if (isValidVariableKey(key)) {
+        keys.add(key);
+      }
+    }
+
+    if (node.type === "form" && node.data && typeof node.data === "object") {
+      const questions = (node.data as { questions?: Array<{ variableKey?: string }> }).questions;
+      for (const question of questions ?? []) {
+        const key = normalizeVariableKey(question?.variableKey ?? "");
+        if (isValidVariableKey(key)) {
+          keys.add(key);
+        }
+      }
+    }
   }
 
   return [...keys].sort();

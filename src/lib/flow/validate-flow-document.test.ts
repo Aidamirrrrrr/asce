@@ -99,7 +99,96 @@ describe("validateFlowDocument — spurious next from keyboard menus", () => {
 
     const issues = validateFlowDocument(doc);
     expect(
-      issues.some((issue) => issue.severity === "error" && /лишняя связь «далее»/i.test(issue.message)),
+      issues.some(
+        (issue) => issue.severity === "error" && /лишняя связь «далее»/i.test(issue.message),
+      ),
     ).toBe(true);
+  });
+});
+
+describe("validateFlowDocument — unfilled variable references (data-flow)", () => {
+  it("flags a message using {{var.X}} that no node produces (broken Курс валют bot)", () => {
+    const doc: BotFlowDocument = {
+      nodes: [
+        node("start", "trigger"),
+        node("fetch", "http_request", {
+          label: "Получить курс",
+          url: "https://www.cbr-xml-daily.ru/daily_json.js",
+          responseVariable: "response",
+        }),
+        node("show", "message", {
+          label: "Курс",
+          text: "USD: {{var.usd}} руб.\nEUR: {{var.eur}} руб.",
+        }),
+      ],
+      edges: [edge("start", "fetch"), edge("fetch", "show", "success")],
+    };
+
+    const issues = validateFlowDocument(doc);
+    const unfilled = issues.find(
+      (issue) => issue.severity === "error" && /не заполняются ни одним узлом/i.test(issue.message),
+    );
+    expect(unfilled).toBeDefined();
+    expect(unfilled?.message).toContain("{{var.usd}}");
+    expect(unfilled?.message).toContain("{{var.eur}}");
+  });
+
+  it("does not flag {{var.X}} when a json_extract / form / choice produces it", () => {
+    const doc: BotFlowDocument = {
+      nodes: [
+        node("start", "trigger"),
+        node("fetch", "http_request", {
+          url: "https://api.example.com",
+          responseVariable: "response",
+        }),
+        node("extract_usd", "json_extract", {
+          sourceVariable: "response",
+          path: "Valute.USD.Value",
+          targetVariable: "usd",
+        }),
+        node("pick", "choice", { variableKey: "eur", options: [{ text: "EUR", value: "eur" }] }),
+        node("ask", "form", { questions: [{ prompt: "Имя?", variableKey: "name", type: "text" }] }),
+        node("show", "message", {
+          label: "Курс",
+          text: "USD: {{var.usd}}, EUR: {{var.eur}}, {{nickname}} {{var.name}}",
+        }),
+      ],
+      edges: [
+        edge("start", "fetch"),
+        edge("fetch", "extract_usd", "success"),
+        edge("extract_usd", "pick"),
+        edge("pick", "ask"),
+        edge("ask", "show"),
+      ],
+    };
+
+    const issues = validateFlowDocument(doc);
+    expect(
+      issues.some(
+        (issue) =>
+          issue.severity === "error" && /не заполняются ни одним узлом/i.test(issue.message),
+      ),
+    ).toBe(false);
+  });
+
+  it("does not flag built-in template vars or secrets", () => {
+    const doc: BotFlowDocument = {
+      nodes: [
+        node("start", "trigger"),
+        node("hi", "message", {
+          label: "Привет",
+          text: "Привет, {{first_name}}! Ключ: {{secret.API_KEY}}",
+        }),
+      ],
+      edges: [edge("start", "hi")],
+    };
+
+    const issues = validateFlowDocument(doc);
+    expect(
+      issues.some(
+        (issue) =>
+          issue.severity === "error" && /не заполняются ни одним узлом/i.test(issue.message),
+      ),
+    ).toBe(false);
   });
 });

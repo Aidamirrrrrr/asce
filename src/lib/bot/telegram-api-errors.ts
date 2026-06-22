@@ -27,3 +27,19 @@ export function formatTelegramBotApiError(error: unknown, context: string): stri
 
   return `${context}: неизвестная ошибка`;
 }
+
+/**
+ * Транзиентна ли ошибка рантайма (по тексту lastError)? Транзиентные ошибки
+ * (сеть, таймаут, 429, 5xx) имеет смысл авто-ретраить. Перманентные (битый/
+ * отозванный токен — 401/404) ретраить бессмысленно: бот будет падать вновь,
+ * нужно вмешательство пользователя (заменить токен).
+ */
+export function isTransientRuntimeError(lastError: string | null | undefined): boolean {
+  if (!lastError?.trim()) {
+    // Нет текста ошибки — считаем транзиентной (даём шанс на восстановление).
+    return true;
+  }
+  const permanent =
+    /\b401\b|\b404\b|unauthorized|forbidden|неверн\w* токен|токен .*откл|замените токен/i;
+  return !permanent.test(lastError);
+}

@@ -3,6 +3,8 @@ import { splitIntoTriggerLanes } from "@/lib/flow/flow-layout";
 import type { BotFlowDocument, FlowNode } from "@/lib/flow/flow-schema";
 import { normalizeMessageNodeData } from "@/lib/flow/message-node-utils";
 import { inferSecretRecipesFromText } from "@/lib/flow/secret-recipes";
+import { collectDeclaredVariableKeys } from "@/lib/flow/set-variable-node-utils";
+import { TEMPLATE_VAR_KEYS } from "@/lib/flow/template-vars";
 
 export type FlowValidationIssue = {
   severity: "error" | "warning";
@@ -380,6 +382,60 @@ function findUnreachableNodes(doc: BotFlowDocument): FlowValidationIssue[] {
   }));
 }
 
+const TEMPLATE_REFERENCE_PATTERN = /\{\{\s*([\w.]+)\s*\}\}/g;
+const BUILTIN_TEMPLATE_KEYS = new Set<string>(TEMPLATE_VAR_KEYS);
+
+/**
+ * Data-flow проверка: каждая ссылка {{var.X}} в текстах узлов должна иметь
+ * «производителя» (form/choice/set_variable/wait_input/http_request/json_extract
+ * или объявленную переменную проекта). Незаполненная переменная = шаблон уйдёт
+ * пустым в Telegram. Это главный класс «молча сломанных» ботов (напр. http_request
+ * без json_extract: текст ссылается на {{var.usd}}, которую никто не заполняет).
+ */
+function findUnfilledVariableReferences(doc: BotFlowDocument): FlowValidationIssue[] {
+  const produced = new Set(collectDeclaredVariableKeys(doc.nodes, doc.variables ?? []));
+
+  const issues: FlowValidationIssue[] = [];
+
+  for (const node of doc.nodes) {
+    const serialized = JSON.stringify(node.data ?? {});
+    const missing = new Set<string>();
+
+    for (const match of serialized.matchAll(TEMPLATE_REFERENCE_PATTERN)) {
+      const rawKey = match[1] ?? "";
+      // Секреты валидируются отдельно (findMissingPaymentSecrets / secret-recipes).
+      if (rawKey.startsWith("secret.")) {
+        continue;
+      }
+      // Встроенные Telegram-переменные ({{nickname}}, {{first_name}}, …) всегда заполнены.
+      if (BUILTIN_TEMPLATE_KEYS.has(rawKey)) {
+        continue;
+      }
+      const candidate = rawKey.replace(/^var\./, "");
+      if (!candidate) {
+        continue;
+      }
+      if (!produced.has(candidate)) {
+        missing.add(candidate);
+      }
+    }
+
+    if (missing.size > 0) {
+      issues.push({
+        severity: "error",
+        message:
+          `Переменные не заполняются ни одним узлом: ${[...missing]
+            .map((key) => `{{var.${key}}}`)
+            .join(", ")}. ` +
+          "Добавь источник (json_extract из HTTP-ответа, form, choice, set_variable или wait_input) до этого шага.",
+        nodeLabel: getNodeLabel(node),
+      });
+    }
+  }
+
+  return issues;
+}
+
 export function validateFlowDocument(doc: BotFlowDocument): FlowValidationIssue[] {
   const issues: FlowValidationIssue[] = [];
   const lanes = splitIntoTriggerLanes(doc.nodes);
@@ -421,6 +477,7 @@ export function validateFlowDocument(doc: BotFlowDocument): FlowValidationIssue[
   issues.push(...findUnconnectedBranches(doc));
   issues.push(...findTriggersWithoutOutgoing(doc));
   issues.push(...findUnreachableNodes(doc));
+  issues.push(...findUnfilledVariableReferences(doc));
 
   return issues;
 }

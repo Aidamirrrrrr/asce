@@ -1,7 +1,8 @@
-import { buildLlmServiceErrorMessage, isLlmServiceError } from "@/lib/ai/llm-retry";
 import { jsonCreateFlow, jsonRefineFlow } from "@/lib/ai/flow-json-generator";
 import { repairFlowStructure } from "@/lib/ai/flow-repair";
+import { buildLlmServiceErrorMessage, isLlmServiceError } from "@/lib/ai/llm-retry";
 import { createDefaultFlow } from "@/lib/flow/default-flow";
+import { deterministicRepair } from "@/lib/flow/deterministic-repair";
 import type { BotFlowDocument } from "@/lib/flow/flow-schema";
 import { validateFlowDocument } from "@/lib/flow/validate-flow-document";
 import type { ProjectChatMessage } from "@/lib/projects";
@@ -63,15 +64,18 @@ export async function generateFlowFromPrompt(
   try {
     // Phase 1: JSON generation (one LLM call, ~3-5s)
     const generated = await jsonCreateFlow(trimmed);
-    callbacks?.onPartialFlow?.(generated.flow, generated.flow.nodes.length);
 
-    // Phase 2: targeted repair (only if validation errors exist)
-    const errors = validateFlowDocument(generated.flow);
+    // Phase 2: deterministic repair (free, no LLM) for unambiguous defects.
+    const repaired = deterministicRepair(generated.flow).doc;
+    callbacks?.onPartialFlow?.(repaired, repaired.nodes.length);
+
+    // Phase 3: targeted LLM repair (only if validation errors remain)
+    const errors = validateFlowDocument(repaired);
     const structuralErrors = errors.filter((i) => i.severity === "error");
     const flow =
       structuralErrors.length > 0
-        ? await repairFlowStructure(generated.flow, structuralErrors)
-        : generated.flow;
+        ? await repairFlowStructure(repaired, structuralErrors)
+        : repaired;
 
     return {
       flow,
@@ -102,15 +106,18 @@ export async function refineFlowFromInstruction({
   try {
     // Phase 1: JSON delta generation (one LLM call)
     const refined = await jsonRefineFlow(currentFlow, trimmed, chatHistory);
-    callbacks?.onPartialFlow?.(refined.flow, refined.flow.nodes.length);
 
-    // Phase 2: targeted repair if structural errors
-    const errors = validateFlowDocument(refined.flow);
+    // Phase 2: deterministic repair (free, no LLM) for unambiguous defects.
+    const repaired = deterministicRepair(refined.flow).doc;
+    callbacks?.onPartialFlow?.(repaired, repaired.nodes.length);
+
+    // Phase 3: targeted LLM repair if structural errors remain
+    const errors = validateFlowDocument(repaired);
     const structuralErrors = errors.filter((i) => i.severity === "error");
     const flow =
       structuralErrors.length > 0
-        ? await repairFlowStructure(refined.flow, structuralErrors)
-        : refined.flow;
+        ? await repairFlowStructure(repaired, structuralErrors)
+        : repaired;
 
     return {
       flow,
