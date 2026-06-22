@@ -39,6 +39,9 @@ import { stripTextEmojisOptional } from "@/lib/text/strip-emojis";
 
 const EDGES_RULES = `ПРАВИЛА EDGES (читай внимательно — ошибки здесь ломают бота):
 
+0. ПЕРВОЕ РЕБРО: первым в массиве edges ВСЕГДА должно быть { "source": "start", "target": "<первый_узел>" }.
+   ✗ Забыть start → welcome — самая частая ошибка, которая делает весь бот недостижимым!
+
 1. КНОПКИ: каждая callback-кнопка message → edge с "buttonText" равным ТОЧНОМУ тексту кнопки.
    Кнопка ведёт к БЛИЖАЙШЕМУ следующему шагу, НЕ к результату в глубине цепочки.
    ✓ { "source": "welcome", "target": "fetch_rates", "buttonText": "Показать курс" }  ← button → http_request
@@ -228,6 +231,22 @@ function applyExplicitEdges(doc: BotFlowDocument, edges: ExplicitEdge[]): BotFlo
   return current;
 }
 
+// Auto-heal: if a trigger has no outgoing edge, connect it to the first non-trigger node.
+// Handles the common case where the LLM forgets the "start → welcome" edge.
+function healOrphanedTriggers(doc: BotFlowDocument): BotFlowDocument {
+  const hasOut = new Set(doc.edges.map((e) => e.source));
+  const orphans = doc.nodes.filter((n) => n.type === "trigger" && !hasOut.has(n.id));
+  if (orphans.length === 0) return doc;
+  let current = doc;
+  for (const trigger of orphans) {
+    const firstTarget = current.nodes.find((n) => n.type !== "trigger");
+    if (!firstTarget) continue;
+    const result = connectNodes(current, { source: trigger.id, target: firstTarget.id });
+    if (result.ok) current = result.doc;
+  }
+  return current;
+}
+
 // ---------------------------------------------------------------------------
 // Create
 // ---------------------------------------------------------------------------
@@ -242,11 +261,12 @@ export async function jsonCreateFlow(prompt: string): Promise<{
   const spec = parseGeneratedFlowSpec(raw);
   const explicitEdges = parseExplicitEdges(raw);
 
-  // Build nodes (normalised, positioned) — skip heuristic edges if LLM gave explicit ones
-  let doc = buildFlowDocument(spec, { skipMinimumNodes: false });
+  // LLM owns all nodes; skipMinimumNodes avoids injecting a ghost ai_reply node
+  let doc = buildFlowDocument(spec, { skipMinimumNodes: true });
   if (explicitEdges.length > 0) {
     doc = applyExplicitEdges(doc, explicitEdges);
   }
+  doc = healOrphanedTriggers(doc);
 
   const flow = applyLayoutToFlowDocument(doc);
 
