@@ -251,6 +251,18 @@
   z-index: 110;
 }
 
+/* Ноды-origin для GPU-слоя; dragging — без задержки. */
+.react-flow__node {
+  will-change: transform;
+}
+
+/* Тень при перетаскивании: опускается на карточку внутри m.div. */
+.react-flow__node.dragging [data-slot="card"] {
+  box-shadow:
+    0 12px 32px -4px rgb(0 0 0 / 0.18),
+    0 4px 12px -2px rgb(0 0 0 / 0.1);
+}
+
 .react-flow__edge.flow-edge-exiting {
   pointer-events: none;
   animation: flow-edge-exit 280ms cubic-bezier(0.25, 0.1, 0.25, 1) forwards;

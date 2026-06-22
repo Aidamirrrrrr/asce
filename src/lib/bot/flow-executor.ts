@@ -12,9 +12,12 @@ import type {
   AdminNotifyNodeData,
   AiReplyNodeData,
   BotFlowDocument,
+  ChoiceNodeData,
   ConditionNodeData,
   FlowNode,
+  FormNodeData,
   HttpRequestNodeData,
+  JumpNodeData,
   JsonExtractNodeData,
   MessageNodeData,
   SaveRecordNodeData,
@@ -22,6 +25,16 @@ import type {
   TriggerNodeData,
   WaitInputNodeData,
 } from "@/lib/flow/flow-schema";
+import {
+  buildChoiceKeyboard,
+  normalizeChoiceNodeData,
+  resolveChoiceValue,
+} from "@/lib/flow/choice-node-utils";
+import {
+  buildContactRequestKeyboard,
+  normalizeFormNodeData,
+  normalizeFormQuestion,
+} from "@/lib/flow/form-node-utils";
 import { normalizeHttpRequestNodeData } from "@/lib/flow/http-request-node-utils";
 import { extractJsonValue, normalizeJsonExtractNodeData } from "@/lib/flow/json-extract-node-utils";
 import { findReplyButtonByText, normalizeMessageNodeData } from "@/lib/flow/message-node-utils";
@@ -131,6 +144,18 @@ function isJsonExtractNode(node: FlowNode): node is FlowNode & { data: JsonExtra
 
 function isSaveRecordNode(node: FlowNode): node is FlowNode & { data: SaveRecordNodeData } {
   return node.type === "save_record";
+}
+
+function isChoiceNode(node: FlowNode): node is FlowNode & { data: ChoiceNodeData } {
+  return node.type === "choice";
+}
+
+function isJumpNode(node: FlowNode): node is FlowNode & { data: JumpNodeData } {
+  return node.type === "jump";
+}
+
+function isFormNode(node: FlowNode): node is FlowNode & { data: FormNodeData } {
+  return node.type === "form";
 }
 
 function matchesTrigger(data: TriggerNodeData, messageText: string): boolean {
@@ -287,6 +312,15 @@ async function executeHttpRequestNodeStep(
     await persistVariable(port, normalized.responseStatusVariable, String(result.status));
   }
 
+  if (normalized.extractions?.length) {
+    for (const extraction of normalized.extractions) {
+      if (extraction.path && extraction.variableKey) {
+        const value = extractJsonValue(result.body, extraction.path);
+        await persistVariable(port, extraction.variableKey, value ?? "");
+      }
+    }
+  }
+
   return result.ok ? "success" : "error";
 }
 
@@ -399,6 +433,19 @@ function getOutgoingEdges(flow: BotFlowDocument, nodeId: string, sourceHandle?: 
   });
 }
 
+async function sendFormQuestion(
+  question: ReturnType<typeof normalizeFormQuestion>,
+  formNodeId: string,
+  port: FlowOutboundPort,
+): Promise<void> {
+  const keyboard =
+    question.type === "contact" ? buildContactRequestKeyboard() : undefined;
+  await port.sendMessage(
+    { text: question.prompt, parseMode: "HTML", keyboard },
+    { nodeId: formNodeId },
+  );
+}
+
 async function walkFromNode(
   flow: BotFlowDocument,
   nodeId: string,
@@ -470,6 +517,49 @@ async function walkFromNode(
     }
 
     return;
+  }
+
+  if (isJumpNode(node)) {
+    const { targetNodeId } = node.data;
+    if (targetNodeId && !visited.has(targetNodeId)) {
+      return walkFromNode(flow, targetNodeId, userMessage, port, visited);
+    }
+    return;
+  }
+
+  if (isChoiceNode(node)) {
+    const data = normalizeChoiceNodeData(node.data);
+    const keyboard = buildChoiceKeyboard(data);
+    const text = data.prompt?.trim()
+      ? interpolateTemplate(data.prompt, port.executionContext.vars, data.parseMode ?? "HTML")
+      : data.prompt;
+    await port.sendMessage(
+      { text, parseMode: data.parseMode, keyboard },
+      { nodeId: node.id },
+    );
+    // Ждём callback — выполнение прекращается до нажатия кнопки
+    return;
+  }
+
+  if (isFormNode(node)) {
+    const data = normalizeFormNodeData(node.data);
+    if (data.questions.length === 0) {
+      const nextEdges = getOutgoingEdges(flow, node.id, "next");
+      for (const edge of nextEdges) {
+        const result = await walkFromNode(flow, edge.target, userMessage, port, visited);
+        if (result?.inputWaitSession || result?.replyKeyboardSession) return result;
+      }
+      return;
+    }
+    const first = normalizeFormQuestion(data.questions[0]);
+    await sendFormQuestion(first, node.id, port);
+    return {
+      inputWaitSession: {
+        nodeId: node.id,
+        variableKey: first.variableKey,
+        formNextQuestionIndex: data.questions.length > 1 ? 1 : undefined,
+      },
+    };
   }
 
   if (isWaitInputNode(node)) {
@@ -639,6 +729,22 @@ export async function executeFlowFromCallback(
   userMessage: string,
   port: FlowOutboundPort,
 ): Promise<FlowWalkResult | undefined> {
+  // Нода «Выбор»: сохраняем выбранный вариант и идём по next
+  const node = flow.nodes.find((n) => n.id === nodeId);
+  if (node && isChoiceNode(node)) {
+    const data = normalizeChoiceNodeData(node.data);
+    const value = resolveChoiceValue(data, buttonId);
+    if (value !== null) {
+      await persistVariable(port, data.variableKey, value);
+    }
+    const nextEdges = getOutgoingEdges(flow, nodeId, "next");
+    for (const edge of nextEdges) {
+      const result = await walkFromNode(flow, edge.target, userMessage, port, new Set([nodeId]));
+      if (result?.inputWaitSession || result?.replyKeyboardSession) return result;
+    }
+    return;
+  }
+
   const messageNode = getMessageNode(flow, nodeId);
   if (!messageNode) {
     logger.warn("callback_no_message_node", {
@@ -722,6 +828,30 @@ export async function executeFlowFromInputWait(
   port: FlowOutboundPort,
 ): Promise<FlowWalkResult | undefined> {
   await persistVariable(port, session.variableKey, userMessage);
+
+  // Форма: задать следующий вопрос или завершить
+  if (session.formNextQuestionIndex !== undefined) {
+    const formNode = flow.nodes.find((n) => n.id === session.nodeId && n.type === "form");
+    if (formNode && isFormNode(formNode)) {
+      const data = normalizeFormNodeData(formNode.data);
+      const nextQ = data.questions[session.formNextQuestionIndex];
+      if (nextQ) {
+        const normalized = normalizeFormQuestion(nextQ);
+        await sendFormQuestion(normalized, formNode.id, port);
+        const hasMore = session.formNextQuestionIndex + 1 < data.questions.length;
+        return {
+          inputWaitSession: {
+            nodeId: session.nodeId,
+            variableKey: normalized.variableKey,
+            formNextQuestionIndex: hasMore ? session.formNextQuestionIndex + 1 : undefined,
+          },
+        };
+      }
+    }
+    // Все вопросы отвечены — продолжаем поток
+    return executeFlowFromMessageNext(flow, session.nodeId, userMessage, port);
+  }
+
   return executeFlowFromMessageNext(flow, session.nodeId, userMessage, port);
 }
 

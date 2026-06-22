@@ -37,6 +37,9 @@ export const FLOW_NODE_TYPES = [
   "admin_notify",
   "json_extract",
   "save_record",
+  "choice",
+  "jump",
+  "form",
 ] as const;
 export type FlowNodeType = (typeof FLOW_NODE_TYPES)[number];
 
@@ -116,6 +119,13 @@ export type HttpRequestHeader = {
   value: string;
 };
 
+export type HttpExtraction = {
+  /** JSON-путь в теле ответа, напр. "data.url" или "items[0].id". */
+  path: string;
+  /** Ключ переменной куда сохранить значение (без префикса var.). */
+  variableKey: string;
+};
+
 export type HttpRequestNodeData = {
   label: string;
   method: HttpRequestMethod;
@@ -125,6 +135,8 @@ export type HttpRequestNodeData = {
   responseVariable?: string;
   responseStatusVariable?: string;
   timeoutMs?: number;
+  /** Встроенные извлечения JSON прямо из ответа — заменяет отдельную json_extract-ноду. */
+  extractions?: HttpExtraction[];
 };
 
 export type AiReplyNodeData = {
@@ -177,6 +189,50 @@ export type ConditionNodeData = {
   rules: ConditionRule[];
 };
 
+// --------------- Новые типы нод ---------------
+
+export type ChoiceOption = {
+  /** Текст кнопки, показываемый пользователю. */
+  text: string;
+  /** Значение, записываемое в переменную (если не задано — используется text). */
+  value?: string;
+};
+
+/** Нода «Выбор»: показывает кнопки, сохраняет выбор в переменную, один выход next. */
+export type ChoiceNodeData = {
+  label: string;
+  /** Вопрос/текст перед кнопками. */
+  prompt: string;
+  /** Переменная куда записать выбранное значение (без префикса var.). */
+  variableKey: string;
+  options: ChoiceOption[];
+  parseMode?: TelegramParseMode;
+};
+
+/** Нода «Переход»: немедленно перекидывает выполнение потока на targetNodeId. */
+export type JumpNodeData = {
+  label: string;
+  /** ID ноды назначения. */
+  targetNodeId: string;
+};
+
+export type FormQuestionType = "text" | "phone" | "email" | "contact";
+
+export type FormQuestion = {
+  /** Текст вопроса, отправляемый пользователю. */
+  prompt: string;
+  /** Переменная для сохранения ответа (без префикса var.). */
+  variableKey: string;
+  /** Тип ввода: text (свободный текст), phone, email, contact (кнопка «Поделиться»). */
+  type: FormQuestionType;
+};
+
+/** Нода «Форма»: последовательно задаёт вопросы и сохраняет ответы в переменные. Один выход next. */
+export type FormNodeData = {
+  label: string;
+  questions: FormQuestion[];
+};
+
 export type FlowSecretDeclaration = {
   key: string;
   label?: string;
@@ -199,7 +255,10 @@ export type FlowNodeData =
   | AiReplyNodeData
   | AdminNotifyNodeData
   | JsonExtractNodeData
-  | SaveRecordNodeData;
+  | SaveRecordNodeData
+  | ChoiceNodeData
+  | JumpNodeData
+  | FormNodeData;
 
 export type FlowNode = Node<FlowNodeData, FlowNodeType>;
 export type FlowEdge = Edge;
@@ -218,6 +277,8 @@ export type FlowNodeTransientData = {
   isEntering?: boolean;
   revealIndex?: number;
   streamReveal?: boolean;
+  /** Нода сейчас перетаскивается пользователем — для визуального подъёма. */
+  isDragging?: boolean;
   /** Кнопки-«назад» этой ноды: handleId → подпись цели. Только для отрисовки. */
   backLinks?: Record<string, string>;
   /** Сторона коннектора для исходящих хендлов: handleId → "left|right|top|bottom". */
@@ -232,6 +293,7 @@ export function stripFlowNodeTransientData(data: FlowNodeData): FlowNodeData {
     isEntering: _isEntering,
     revealIndex: _revealIndex,
     streamReveal: _streamReveal,
+    isDragging: _isDragging,
     backLinks: _backLinks,
     handleSides: _handleSides,
     hasNextEdge: _hasNextEdge,
@@ -678,6 +740,29 @@ export function createDefaultNodeData(type: FlowNodeType): FlowNodeData {
         label: "Запись",
         collection: "leads",
         fields: [{ key: "name", value: "{{nickname}}" }],
+      };
+    case "choice":
+      return {
+        label: "Выбор",
+        prompt: "Выберите вариант:",
+        variableKey: "choice",
+        options: [
+          { text: "Вариант 1" },
+          { text: "Вариант 2" },
+        ],
+      };
+    case "jump":
+      return {
+        label: "Переход",
+        targetNodeId: "",
+      };
+    case "form":
+      return {
+        label: "Форма",
+        questions: [
+          { prompt: "Введите ваше имя:", variableKey: "name", type: "text" },
+          { prompt: "Ваш телефон:", variableKey: "phone", type: "phone" },
+        ],
       };
   }
 }

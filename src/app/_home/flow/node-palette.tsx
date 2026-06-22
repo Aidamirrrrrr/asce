@@ -3,9 +3,12 @@
 import {
   BellRingIcon,
   BracesIcon,
+  ClipboardListIcon,
+  CornerRightDownIcon,
   DatabaseIcon,
   GitBranchIcon,
   GlobeIcon,
+  ListChecksIcon,
   MessageSquareIcon,
   SparklesIcon,
   TextCursorInputIcon,
@@ -36,6 +39,9 @@ const paletteItems: Array<{
   { type: "admin_notify", label: "Админу", icon: BellRingIcon },
   { type: "json_extract", label: "JSON", icon: BracesIcon },
   { type: "save_record", label: "Запись", icon: DatabaseIcon },
+  { type: "choice", label: "Выбор", icon: ListChecksIcon },
+  { type: "jump", label: "Переход", icon: CornerRightDownIcon },
+  { type: "form", label: "Форма", icon: ClipboardListIcon },
 ];
 
 export function NodePalette({ onAddNode }: NodePaletteProps) {

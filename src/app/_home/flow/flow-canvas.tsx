@@ -69,7 +69,7 @@ function FlowEditorInner({
           fitView({
             nodes: [{ id: nodeId }],
             padding: 0.9,
-            duration: Math.round(duration.normal * 1000),
+            duration: Math.round(duration.slow * 0.6 * 1000),
             maxZoom: 1,
           });
         });
@@ -105,6 +105,7 @@ function FlowEditorInner({
   const streamRevealedIdsRef = useRef(new Set<string>());
   const manualEnterIdsRef = useRef(new Set<string>());
   const [pendingEnterIds, setPendingEnterIds] = useState<Set<string>>(() => new Set());
+  const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const metadataRef = useRef<Pick<BotFlowDocument, "secrets" | "variables">>({
     secrets: flowDocument.secrets,
     variables: flowDocument.variables,
@@ -179,6 +180,7 @@ function FlowEditorInner({
           isEntering: !isFlowGenerating && (pendingEnterIds.has(node.id) || !revealed),
           streamReveal: isFlowGenerating && !streamRevealedIdsRef.current.has(node.id),
           revealIndex: manualEnterIdsRef.current.has(node.id) ? 0 : index,
+          isDragging: node.id === draggingNodeId,
           backLinks: backNavigation.backLinksByNode.get(node.id),
           handleSides: handleSides.get(node.id),
           hasNextEdge: nextEdgeSourceIds.has(node.id),
@@ -189,6 +191,7 @@ function FlowEditorInner({
       pendingEnterIds,
       revealed,
       isFlowGenerating,
+      draggingNodeId,
       backNavigation,
       handleSides,
       nextEdgeSourceIds,
@@ -532,6 +535,8 @@ function FlowEditorInner({
         onMoveEnd={onMoveEnd}
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
+        onNodeDragStart={(_, node) => setDraggingNodeId(node.id)}
+        onNodeDragStop={() => setDraggingNodeId(null)}
         nodesDraggable={revealed && !isFlowGenerating}
         nodesConnectable={revealed && !isFlowGenerating}
         elementsSelectable={revealed && !isFlowGenerating}

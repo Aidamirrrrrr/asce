@@ -2,9 +2,12 @@ import type { NodeTypes } from "@xyflow/react";
 
 import { AdminNotifyNode } from "@/app/_home/flow/nodes/admin-notify-node";
 import { AiReplyNode } from "@/app/_home/flow/nodes/ai-reply-node";
+import { ChoiceNode } from "@/app/_home/flow/nodes/choice-node";
 import { ConditionNode } from "@/app/_home/flow/nodes/condition-node";
+import { FormNode } from "@/app/_home/flow/nodes/form-node";
 import { HttpRequestNode } from "@/app/_home/flow/nodes/http-request-node";
 import { JsonExtractNode } from "@/app/_home/flow/nodes/json-extract-node";
+import { JumpNode } from "@/app/_home/flow/nodes/jump-node";
 import { MessageNode } from "@/app/_home/flow/nodes/message-node";
 import { SaveRecordNode } from "@/app/_home/flow/nodes/save-record-node";
 import { SetVariableNode } from "@/app/_home/flow/nodes/set-variable-node";
@@ -22,4 +25,7 @@ export const flowNodeTypes: NodeTypes = {
   admin_notify: AdminNotifyNode,
   json_extract: JsonExtractNode,
   save_record: SaveRecordNode,
+  choice: ChoiceNode,
+  jump: JumpNode,
+  form: FormNode,
 };

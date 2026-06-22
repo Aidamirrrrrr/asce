@@ -62,6 +62,16 @@ export function estimateNodeHeight(node: FlowNode): number {
     return FLOW_NODE_MESSAGE_WITH_BUTTONS_HEIGHT;
   }
 
+  if (node.type === "choice") {
+    return FLOW_NODE_MESSAGE_WITH_BUTTONS_HEIGHT;
+  }
+
+  if (node.type === "form") {
+    const questions = (node.data as { questions?: unknown[] }).questions;
+    const count = Array.isArray(questions) ? questions.length : 0;
+    return FLOW_NODE_BASE_HEIGHT + Math.min(count, 4) * 20;
+  }
+
   return FLOW_NODE_BASE_HEIGHT;
 }
 

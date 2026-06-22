@@ -4,7 +4,10 @@ import {
   unescapeJsonStringFragment,
 } from "@/lib/ai/stream-json-utils";
 import { normalizeAdminNotifyNodeData } from "@/lib/flow/admin-notify-node-utils";
+import { normalizeChoiceNodeData } from "@/lib/flow/choice-node-utils";
 import { createConditionRuleId, normalizeConditionNodeData } from "@/lib/flow/condition-node-utils";
+import { normalizeFormNodeData } from "@/lib/flow/form-node-utils";
+import { normalizeJumpNodeData } from "@/lib/flow/jump-node-utils";
 import {
   findBestButtonTarget,
   getBranchableMessageHandles,
@@ -85,6 +88,11 @@ export type GeneratedFlowNodeSpec = {
   targetVariable?: string;
   collection?: string;
   fields?: Array<{ key: string; value: string }>;
+  extractions?: Array<{ path: string; variableKey: string }>;
+  prompt?: string;
+  options?: Array<{ text: string; value?: string }>;
+  targetNodeId?: string;
+  questions?: Array<{ prompt: string; variableKey: string; type?: string }>;
 };
 
 export type GeneratedFlowSpec = {
@@ -328,7 +336,7 @@ function buildGeneratedEdges(nodes: FlowNode[], branchByNodeId?: BranchByNodeId)
     const node = nodes[index];
     const next = nodes[index + 1];
 
-    if (node.type === "condition" || node.type === "http_request") {
+    if (node.type === "condition" || node.type === "http_request" || node.type === "jump") {
       continue;
     }
 
@@ -352,7 +360,11 @@ function buildGeneratedEdges(nodes: FlowNode[], branchByNodeId?: BranchByNodeId)
       id: `e-${node.id}-${next.id}`,
       source: node.id,
       target: next.id,
-      ...(node.type === "message" || node.type === "set_variable" || node.type === "wait_input"
+      ...(node.type === "message" ||
+      node.type === "set_variable" ||
+      node.type === "wait_input" ||
+      node.type === "choice" ||
+      node.type === "form"
         ? { sourceHandle: "next" }
         : {}),
     });
@@ -749,6 +761,7 @@ function normalizeNodeSpecBase(raw: unknown): GeneratedFlowNodeSpec | null {
           responseVariable: rawNode.responseVariable,
           responseStatusVariable: rawNode.responseStatusVariable,
           timeoutMs: rawNode.timeoutMs,
+          extractions: rawNode.extractions,
         }),
       };
     }
@@ -789,6 +802,34 @@ function normalizeNodeSpecBase(raw: unknown): GeneratedFlowNodeSpec | null {
       });
       return { type: "save_record", ...normalized };
     }
+    case "choice":
+      return {
+        type: "choice",
+        label,
+        prompt: typeof node.prompt === "string" ? stripTextEmojis(node.prompt.trim()) : "",
+        variableKey:
+          typeof node.variableKey === "string" && node.variableKey.trim()
+            ? node.variableKey.trim()
+            : "choice",
+        options: Array.isArray(node.options) ? node.options : [],
+        ...(node.parseMode ? { parseMode: node.parseMode } : {}),
+      };
+    case "jump":
+      return {
+        type: "jump",
+        label,
+        targetNodeId: typeof node.targetNodeId === "string" ? node.targetNodeId.trim() : "",
+      };
+    case "form":
+      return {
+        type: "form",
+        label,
+        questions: (Array.isArray(node.questions) ? node.questions : []).map((q) => ({
+          prompt: q.prompt ?? "",
+          variableKey: q.variableKey ?? "field",
+          type: (q.type as "text" | "phone" | "email" | "contact") ?? "text",
+        })),
+      };
   }
 }
 
@@ -1030,6 +1071,7 @@ export function buildFlowDocument(
             responseVariable: nodeSpec.responseVariable,
             responseStatusVariable: nodeSpec.responseStatusVariable,
             timeoutMs: nodeSpec.timeoutMs,
+            extractions: nodeSpec.extractions,
           }),
         };
       case "ai_reply":
@@ -1074,6 +1116,43 @@ export function buildFlowDocument(
             label: nodeSpec.label,
             collection: nodeSpec.collection,
             fields: nodeSpec.fields,
+          }),
+        };
+      case "choice":
+        return {
+          id,
+          type: "choice" as const,
+          position: buildGeneratedNodePosition(index),
+          data: normalizeChoiceNodeData({
+            label: nodeSpec.label,
+            prompt: nodeSpec.prompt ?? "",
+            variableKey: nodeSpec.variableKey ?? "choice",
+            options: Array.isArray(nodeSpec.options) ? nodeSpec.options : [],
+            parseMode: nodeSpec.parseMode,
+          }),
+        };
+      case "jump":
+        return {
+          id,
+          type: "jump" as const,
+          position: buildGeneratedNodePosition(index),
+          data: normalizeJumpNodeData({
+            label: nodeSpec.label,
+            targetNodeId: nodeSpec.targetNodeId ?? "",
+          }),
+        };
+      case "form":
+        return {
+          id,
+          type: "form" as const,
+          position: buildGeneratedNodePosition(index),
+          data: normalizeFormNodeData({
+            label: nodeSpec.label,
+            questions: (Array.isArray(nodeSpec.questions) ? nodeSpec.questions : []).map((q) => ({
+              prompt: q.prompt ?? "",
+              variableKey: q.variableKey ?? "field",
+              type: (q.type as "text" | "phone" | "email" | "contact") ?? "text",
+            })),
           }),
         };
       default: {

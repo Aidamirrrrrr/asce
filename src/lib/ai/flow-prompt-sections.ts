@@ -13,12 +13,15 @@ export const NODE_TYPES_SECTION = `Доступные типы узлов:
 2. message — фиксированное сообщение бота
 3. condition — ветвление по правилам Telegram (ветки yes/no)
 4. set_variable — записать пользовательскую переменную. Поля: label, variableKey (snake_case), valueSource ("literal" | "user_message" | "template"), value (для literal/template)
-5. wait_input — пауза до ответа пользователя (текст, контакт или геолокация); сохраняет в variableKey (snake_case). Ставь сразу после message с вопросом. Для телефона можно reply-кнопку kind request_contact вместо ручного ввода
-6. http_request — запрос к внешнему API (ветки success/error). Поля: label, method (GET|POST|PUT|PATCH|DELETE), url, headers (массив {key,value}), body, responseVariable, responseStatusVariable
+5. wait_input — пауза до ответа пользователя (текст или контакт); сохраняет в variableKey (snake_case). ИСПОЛЬЗУЙ только если нужен ввод свободного текста без вариантов. Для фиксированного набора — используй choice или form.
+6. http_request — запрос к внешнему API (ветки success/error). Поля: label, method (GET|POST|PUT|PATCH|DELETE), url, headers (массив {key,value}), body, responseVariable, responseStatusVariable, extractions (массив {path,variableKey} — встроенная замена json_extract, предпочтительнее)
 7. ai_reply — ответ через AI. Поля: label, systemPrompt
 8. admin_notify — отправить уведомление в заданный чат (например админу/в группу заявок). Поля: label, chatId (ID чата или шаблон, по умолчанию "{{secret.ADMIN_CHAT_ID}}"), text (поддерживает {{var.*}} / {{secret.*}}). Линейный узел (ветка next). Используй для «уведомить менеджера о заявке», «оповестить админа»
-9. json_extract — извлечь значение по пути из JSON-переменной в новую переменную. Поля: label, sourceVariable (переменная с JSON, напр. ответ http_request), path (например data.items[0].name; пусто = весь объект), targetVariable. Линейный узел (ветка next). Ставь сразу после http_request, чтобы достать поле из ответа API
-10. save_record — узел «Запись»: сохранить данные (запись, лид, заказ, бронь) во ВСТРОЕННОЕ хранилище проекта. Поля: label (по умолчанию «Запись»), collection (имя набора, латиница: "appointments", "leads", "orders"), fields (массив {key, value}; value поддерживает {{var.*}} / {{nickname}}). Линейный узел (ветка next). Это правильный способ сохранить данные у нас — владелец видит их в чате проекта, БЕЗ внешнего API`;
+9. json_extract — извлечь значение по пути из JSON-переменной. ПРЕДПОЧИТАЙ поле extractions на http_request вместо отдельного json_extract.
+10. save_record — узел «Запись»: сохранить данные (запись, лид, заказ, бронь) во ВСТРОЕННОЕ хранилище проекта. Поля: label, collection (латиница: "appointments", "leads", "orders"), fields (массив {key, value}; value поддерживает {{var.*}} / {{nickname}}). Линейный узел. Владелец видит записи в чате проекта, БЕЗ внешнего API
+11. choice — ★ ГЛАВНЫЙ узел для выбора из вариантов. Показывает inline-кнопки → сохраняет выбор → ОДИН выход next. Поля: label, prompt (текст вопроса), variableKey (куда сохранить выбор, snake_case без var.), options (массив {text, value?}). ИСПОЛЬЗУЙ вместо паттерна message + N×set_variable. Примеры: выбор услуги, мастера, дня недели, времени, города.
+12. jump — переход (goto) к другой ноде. Поля: label, targetNodeId (id ноды назначения из list_nodes). Не имеет исходящих рёбер на холсте — выполнение переходит по targetNodeId. Используй для кнопки «Назад в меню» и циклов. ВАЖНО: сначала list_nodes → возьми нужный id → создай jump с этим targetNodeId.
+13. form — ★ ГЛАВНЫЙ узел для сбора нескольких полей подряд. Задаёт вопросы последовательно, сохраняет ответы в переменные, ОДИН выход next. Поля: label, questions (массив {prompt, variableKey, type: "text"|"phone"|"email"|"contact"}). ИСПОЛЬЗУЙ вместо цепочки wait_input-нод. Пример: сбор имени+телефона+почты = одна form-нода вместо 6 нод.`;
 
 export const CONDITION_SECTION = `Поля condition:
 - label (string), matchMode ("all" | "any")

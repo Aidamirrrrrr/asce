@@ -12,6 +12,28 @@ export const gentleSpring: Transition = {
   damping: 24,
 };
 
+/** Для появления нод: пружинистый, но не слишком быстрый. */
+export const nodeEnterSpring: Transition = {
+  type: "spring",
+  stiffness: 320,
+  damping: 28,
+  mass: 0.8,
+};
+
+/** Быстрый захват при drag-старте. */
+export const dragLiftSpring: Transition = {
+  type: "spring",
+  stiffness: 500,
+  damping: 32,
+};
+
+/** Плавное возвращение на место после drag. */
+export const dragReleaseSpring: Transition = {
+  type: "spring",
+  stiffness: 280,
+  damping: 26,
+};
+
 export const gentleEase = [0.25, 0.1, 0.25, 1] as const;
 
 export const duration = {

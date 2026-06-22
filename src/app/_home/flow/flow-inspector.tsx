@@ -3,9 +3,12 @@
 import {
   BellRingIcon,
   BracesIcon,
+  ClipboardListIcon,
+  CornerRightDownIcon,
   DatabaseIcon,
   GitBranchIcon,
   GlobeIcon,
+  ListChecksIcon,
   MessageSquareIcon,
   SparklesIcon,
   TextCursorInputIcon,
@@ -117,6 +120,21 @@ const nodeTypeMeta: Record<
     label: "Запись",
     description: "Сохранение данных во встроенное хранилище проекта",
     icon: DatabaseIcon,
+  },
+  choice: {
+    label: "Выбор",
+    description: "Inline-кнопки с сохранением выбора в переменную",
+    icon: ListChecksIcon,
+  },
+  jump: {
+    label: "Переход",
+    description: "Переход к другой ноде по ID",
+    icon: CornerRightDownIcon,
+  },
+  form: {
+    label: "Форма",
+    description: "Последовательный сбор нескольких полей",
+    icon: ClipboardListIcon,
   },
 };
 

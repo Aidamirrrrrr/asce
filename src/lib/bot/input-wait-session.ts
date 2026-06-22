@@ -10,6 +10,8 @@ const PREFIX = "session:input-wait";
 export type InputWaitSession = {
   nodeId: string;
   variableKey: string;
+  /** Если задано — это шаг формы. После сохранения ответа нужно задать вопрос с этим индексом. */
+  formNextQuestionIndex?: number;
 };
 
 function key(projectId: string, chatId: number): string {
