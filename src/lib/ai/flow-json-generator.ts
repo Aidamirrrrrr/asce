@@ -37,6 +37,38 @@ import { stripTextEmojisOptional } from "@/lib/text/strip-emojis";
 // Prompts
 // ---------------------------------------------------------------------------
 
+const EDGES_RULES = `ПРАВИЛА EDGES (читай внимательно — ошибки здесь ломают бота):
+
+1. КНОПКИ: каждая callback-кнопка message → edge с "buttonText" равным ТОЧНОМУ тексту кнопки.
+   Кнопка ведёт к БЛИЖАЙШЕМУ следующему шагу, НЕ к результату в глубине цепочки.
+   ✓ { "source": "welcome", "target": "fetch_rates", "buttonText": "Показать курс" }  ← button → http_request
+   ✗ { "source": "welcome", "target": "show_rates",  "buttonText": "Показать курс" }  ← пропустил http_request!
+
+2. CONDITION ветки:
+   "yes"  = условие ВЫПОЛНЕНО (пользователь подписан / подходит / прошёл проверку)
+   "no"   = условие НЕ выполнено (не подписан / не подходит / не прошёл)
+   ✓ { "source": "check_sub", "target": "content",        "branch": "yes" }  ← подписан → контент
+   ✓ { "source": "check_sub", "target": "ask_to_sub",     "branch": "no"  }  ← не подписан → просим подписаться
+   ✗ { "source": "check_sub", "target": "content",        "branch": "no"  }  ← НЕВЕРНО, перепутаны ветки!
+
+3. HTTP_REQUEST ветки:
+   "success" = запрос вернул 2xx
+   "error"   = запрос упал или вернул ошибку
+   Кнопка ведёт к http_request узлу, НЕ к success-ноде:
+   ✓ { "source": "menu", "target": "fetch_data", "buttonText": "Получить данные" }
+   ✓ { "source": "fetch_data", "target": "show_result", "branch": "success" }
+   ✓ { "source": "fetch_data", "target": "error_msg",   "branch": "error"   }
+
+4. МЕНЮ С РАЗДЕЛАМИ: каждая кнопка → своя нода раздела (НЕ общая нода).
+   ✓ { "source": "menu", "target": "section_faq",      "buttonText": "FAQ"      }
+   ✓ { "source": "menu", "target": "section_booking",  "buttonText": "Запись"   }
+   ✓ { "source": "menu", "target": "section_contacts", "buttonText": "Контакты" }
+   ✗ { "source": "menu", "target": "ai_reply",         "buttonText": "FAQ"      }  ← неверно!
+
+5. Линейные узлы (message без кнопок, choice, form, wait_input, save_record, admin_notify, ai_reply) → edge без branch/buttonText.
+6. jump — НЕ добавляй edge (использует targetNodeId внутри).
+7. choice/form → один edge, target = следующий шаг после сбора данных.`;
+
 const CREATE_SYSTEM_PROMPT = `Ты — генератор схем Telegram-ботов. Выдай ТОЛЬКО корректный JSON-объект — без пояснений, без markdown-блоков.
 
 Формат ответа:
@@ -45,27 +77,23 @@ const CREATE_SYSTEM_PROMPT = `Ты — генератор схем Telegram-бо
   "assistantMessage": "Что построено: 1-2 предложения по-русски",
   "nodes": [
     { "id": "start", "type": "trigger", "label": "Старт", "command": "/start", "triggerType": "command" },
-    { "id": "welcome", "type": "message", "label": "Приветствие", "text": "...", "keyboard": { "type": "inline", "buttons": [["Записаться"]] } },
     ...
   ],
   "edges": [
-    { "source": "start", "target": "welcome" },
-    { "source": "welcome", "target": "booking", "buttonText": "Записаться" },
-    { "source": "cond", "target": "ok", "branch": "yes" },
-    { "source": "cond", "target": "fail", "branch": "no" },
-    { "source": "http", "target": "next_step", "branch": "success" },
-    { "source": "http", "target": "error_msg", "branch": "error" }
+    { "source": "start",      "target": "welcome"    },
+    { "source": "welcome",    "target": "section_a",  "buttonText": "Раздел А" },
+    { "source": "welcome",    "target": "section_b",  "buttonText": "Раздел Б" },
+    { "source": "check_cond", "target": "ok_node",    "branch": "yes" },
+    { "source": "check_cond", "target": "fail_node",  "branch": "no"  },
+    { "source": "http_node",  "target": "result",     "branch": "success" },
+    { "source": "http_node",  "target": "err_msg",    "branch": "error"   }
   ]
 }
 
-Правила edges:
-- КАЖДАЯ callback-кнопка message ОБЯЗАНА иметь edge с точным "buttonText" (текст кнопки слово в слово).
-- Линейные узлы (message без кнопок, choice, form, wait_input, save_record, admin_notify, set_variable, ai_reply) — edge без branch и без buttonText.
-- condition → branch "yes" и branch "no".
-- http_request → branch "success" и branch "error".
-- jump — НЕ добавляй edge (он использует targetNodeId внутри).
-- choice/form — только один edge с target = следующий шаг сценария.
-- Все node id уникальны, snake_case, латиница.
+ID узлов: уникальный snake_case, латиница (start, main_menu, faq_delivery, booking_form).
+
+${EDGES_RULES}
+
 ${NO_EMOJI_RULE}.
 
 ${NODE_TYPES_SECTION}
@@ -103,13 +131,14 @@ const REFINE_SYSTEM_PROMPT = `Ты — редактор схем Telegram-бот
   ]
 }
 
-Правила:
+Правила изменений:
 - Добавляй только то что реально меняется — не дублируй неизменённые узлы.
 - Для существующих кнопок message: если добавляешь новый целевой узел — укажи edge с buttonText.
 - deleteNodeIds удаляет узел И все его рёбра автоматически.
-- addEdges: branch допустимо "yes"/"no"/"success"/"error"; buttonText — для callback-кнопок message.
 - ID новых узлов: уникальный snake_case, латиница.
 ${NO_EMOJI_RULE}.
+
+${EDGES_RULES}
 
 ${NODE_TYPES_SECTION}
 
