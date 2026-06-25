@@ -1,3 +1,4 @@
+import { isBillingEnforced } from "@/lib/beta";
 import { getPlan, isPaidPlan, type PlanId } from "@/lib/billing/plans";
 import { db } from "@/lib/db";
 import {
@@ -17,6 +18,9 @@ export async function startSubscriptionCheckout(input: {
 }): Promise<CheckoutResult> {
   const { userId, returnUrl } = input;
 
+  if (!isBillingEnforced()) {
+    return { ok: false, status: 403, error: "Тарифы отключены на период бета-теста" };
+  }
   if (!isPaidPlan(input.planId)) {
     return { ok: false, status: 400, error: "Тариф недоступен для оплаты" };
   }

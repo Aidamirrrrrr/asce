@@ -1,3 +1,4 @@
+import { getBetaUnlimitedPlan, isBillingEnforced } from "@/lib/beta";
 import { AiQuotaExceededError } from "@/lib/billing/errors";
 import { currentPeriodKey } from "@/lib/billing/period";
 import type { Plan } from "@/lib/billing/plans";
@@ -12,6 +13,8 @@ export type QuotaStatus = {
   limit: number;
   remaining: number;
   exceeded: boolean;
+  /** Квота не применяется (открытая бета). */
+  unlimited: boolean;
 };
 
 /** Сумма израсходованных ИИ-токенов пользователя за текущий месяц. */
@@ -23,18 +26,31 @@ export async function getMonthlyTokens(userId: string, now: Date = new Date()): 
 }
 
 export async function getQuotaStatus(userId: string, now: Date = new Date()): Promise<QuotaStatus> {
-  const [plan, used] = await Promise.all([
-    resolveActivePlan(userId),
-    getMonthlyTokens(userId, now),
-  ]);
+  const used = await getMonthlyTokens(userId, now);
+  const period = currentPeriodKey(now);
+
+  if (!isBillingEnforced()) {
+    return {
+      plan: getBetaUnlimitedPlan(),
+      period,
+      used,
+      limit: 0,
+      remaining: 0,
+      exceeded: false,
+      unlimited: true,
+    };
+  }
+
+  const plan = await resolveActivePlan(userId);
   const limit = plan.monthlyTokenQuota;
   return {
     plan,
-    period: currentPeriodKey(now),
+    period,
     used,
     limit,
     remaining: Math.max(limit - used, 0),
     exceeded: used >= limit,
+    unlimited: false,
   };
 }
 
@@ -43,6 +59,9 @@ export async function getQuotaStatus(userId: string, now: Date = new Date()): Pr
  * если месячный лимит тарифа уже выбран.
  */
 export async function assertAiQuota(userId: string, now: Date = new Date()): Promise<void> {
+  if (!isBillingEnforced()) {
+    return;
+  }
   const status = await getQuotaStatus(userId, now);
   if (status.exceeded) {
     throw new AiQuotaExceededError({

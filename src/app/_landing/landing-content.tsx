@@ -21,6 +21,7 @@ import type { ComponentType } from "react";
 
 import { HeroPreview } from "@/app/_landing/hero-preview";
 import { BetaBadge } from "@/components/ui/beta-badge";
+import { formatBetaSeatsLabel } from "@/lib/beta";
 import { Button } from "@/components/ui/button";
 import { GradientText } from "@/components/ui/gradient-text";
 import { duration, fadeUp, gentleEase, scaleIn, staggerContainer, staggerItem } from "@/lib/motion";
@@ -124,7 +125,7 @@ const FAQ = [
     q: "Нужно ли уметь программировать?",
     a: "Нет. Описываете бота обычными словами, сценарий собирает ИИ.",
   },
-  { q: "Сколько стоит?", a: "В бете бесплатно. Места ограничены, дальше появятся тарифы." },
+  { q: "Сколько стоит?", a: "Сейчас открытая бета — бесплатно и без ограничений." },
   { q: "Где работает бот?", a: "В Telegram. Подключаете токен от @BotFather за минуту." },
   { q: "Можно принимать оплату?", a: "Да, через ЮKassa прямо внутри бота." },
   {
@@ -137,6 +138,8 @@ const FAQ = [
 const viewport = { once: true, amount: 0.3 } as const;
 
 export function LandingContent({ maxBetaUsers }: { maxBetaUsers: number }) {
+  const betaSeatsLabel = formatBetaSeatsLabel(maxBetaUsers);
+  const limitedBeta = maxBetaUsers > 0;
   return (
     <LazyMotion features={domAnimation}>
       <div className="relative min-h-svh overflow-hidden bg-background text-foreground">
@@ -178,7 +181,7 @@ export function LandingContent({ maxBetaUsers }: { maxBetaUsers: number }) {
               className="flex flex-col items-start gap-6"
             >
               <m.div variants={staggerItem}>
-                <BetaBadge>Открытая бета · бесплатно · {maxBetaUsers} мест</BetaBadge>
+                <BetaBadge>Открытая бета · бесплатно · {betaSeatsLabel}</BetaBadge>
               </m.div>
               <m.h1
                 variants={staggerItem}
@@ -326,17 +329,26 @@ export function LandingContent({ maxBetaUsers }: { maxBetaUsers: number }) {
               aria-hidden="true"
               className="-z-10 -translate-x-1/2 pointer-events-none absolute top-0 left-1/2 size-[420px] rounded-full bg-primary/15 blur-[100px]"
             />
-            <BetaBadge>Идёт набор в бету</BetaBadge>
+            <BetaBadge>{limitedBeta ? "Идёт набор в бету" : "Открытая бета"}</BetaBadge>
             <h2 className="max-w-xl text-balance font-semibold text-3xl sm:text-4xl">
-              Ограниченный доступ: <GradientText>{maxBetaUsers} мест</GradientText>
+              {limitedBeta ? (
+                <>
+                  Ограниченный доступ: <GradientText>{betaSeatsLabel}</GradientText>
+                </>
+              ) : (
+                <>
+                  <GradientText>Без ограничений</GradientText> на период бета-теста
+                </>
+              )}
             </h2>
             <p className="max-w-md text-muted-foreground">
-              Сейчас открыт бесплатный бета-тест. Места ограничены, чтобы держать качество и
-              скорость. Когда набор закроется, попадёте в лист ожидания.
+              {limitedBeta
+                ? "Сейчас открыт бесплатный бета-тест. Места ограничены, чтобы держать качество и скорость. Когда набор закроется, попадёте в лист ожидания."
+                : "Сейчас открытая бета: все возможности платформы доступны бесплатно, без лимитов на ИИ и количество ботов."}
             </p>
             <m.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
               <Button asChild size="lg">
-                <Link href="/register">Занять место</Link>
+                <Link href="/register">{limitedBeta ? "Занять место" : "Начать бесплатно"}</Link>
               </Button>
             </m.div>
           </m.section>

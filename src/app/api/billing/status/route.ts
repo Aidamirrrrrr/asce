@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireUser } from "@/lib/auth/session";
+import { isBillingEnforced } from "@/lib/beta";
 import { getQuotaStatus } from "@/lib/billing/ai-usage";
 import { PLANS } from "@/lib/billing/plans";
 
@@ -11,8 +12,10 @@ export async function GET() {
   }
 
   const quota = await getQuotaStatus(authResult.userId);
+  const billingEnforced = isBillingEnforced();
 
   return NextResponse.json({
+    betaMode: !billingEnforced,
     plan: {
       id: quota.plan.id,
       name: quota.plan.name,
@@ -25,14 +28,17 @@ export async function GET() {
       tokensLimit: quota.limit,
       tokensRemaining: quota.remaining,
       exceeded: quota.exceeded,
+      unlimited: quota.unlimited,
     },
-    availablePlans: Object.values(PLANS).map((plan) => ({
-      id: plan.id,
-      name: plan.name,
-      priceRub: plan.priceRub,
-      monthlyTokenQuota: plan.monthlyTokenQuota,
-      maxProjects: plan.maxProjects,
-      features: plan.features,
-    })),
+    availablePlans: billingEnforced
+      ? Object.values(PLANS).map((plan) => ({
+          id: plan.id,
+          name: plan.name,
+          priceRub: plan.priceRub,
+          monthlyTokenQuota: plan.monthlyTokenQuota,
+          maxProjects: plan.maxProjects,
+          features: plan.features,
+        }))
+      : [],
   });
 }

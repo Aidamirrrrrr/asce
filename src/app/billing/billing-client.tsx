@@ -19,6 +19,7 @@ type UsageInfo = {
   limit: number;
   remaining: number;
   exceeded: boolean;
+  unlimited: boolean;
 };
 
 function formatTokens(value: number): string {
@@ -29,14 +30,18 @@ export function BillingClient({
   currentPlanId,
   usage,
   plans,
+  betaMode = false,
 }: {
   currentPlanId: string;
   usage: UsageInfo;
   plans: PlanCard[];
+  betaMode?: boolean;
 }) {
   const [pendingPlan, setPendingPlan] = useState<string | null>(null);
   const usedPercent =
-    usage.limit > 0 ? Math.min(100, Math.round((usage.used / usage.limit) * 100)) : 0;
+    !usage.unlimited && usage.limit > 0
+      ? Math.min(100, Math.round((usage.used / usage.limit) * 100))
+      : 0;
 
   async function startCheckout(planId: string) {
     setPendingPlan(planId);
@@ -57,6 +62,39 @@ export function BillingClient({
     } finally {
       setPendingPlan(null);
     }
+  }
+
+  if (betaMode) {
+    return (
+      <div className="flex flex-col gap-8">
+        <header className="flex flex-col gap-2">
+          <h1 className="font-semibold text-2xl">Бета-тест</h1>
+          <p className="text-muted-foreground text-sm">
+            Тарифы и лимиты временно отключены. Пользуйтесь платформой без ограничений.
+          </p>
+        </header>
+
+        <section className="rounded-xl bg-card p-5 ring-1 ring-foreground/10">
+          <div className="mb-2 flex items-center justify-between text-sm">
+            <span className="font-medium">Расход ИИ за месяц</span>
+            <span className="tabular-nums">
+              {formatTokens(usage.used)} токенов · <span className="text-primary">без лимита</span>
+            </span>
+          </div>
+          <p className="text-muted-foreground text-xs">
+            Период учёта: {usage.period}. Статистика ведётся для наблюдения, блокировок нет.
+          </p>
+        </section>
+
+        <section className="rounded-xl border border-primary/20 bg-primary/5 p-5">
+          <p className="font-medium text-sm">Открытая бета</p>
+          <p className="mt-1 text-muted-foreground text-sm">
+            Платные тарифы появятся после завершения бета-теста. Сейчас доступны все возможности
+            без оплаты.
+          </p>
+        </section>
+      </div>
+    );
   }
 
   return (

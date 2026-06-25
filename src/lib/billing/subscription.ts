@@ -1,3 +1,4 @@
+import { getBetaUnlimitedPlan, isBillingEnforced } from "@/lib/beta";
 import { DEFAULT_PLAN_ID, getPlan, type Plan, type PlanId } from "@/lib/billing/plans";
 import { db } from "@/lib/db";
 
@@ -6,6 +7,10 @@ import { db } from "@/lib/db";
  * status=active и не истёк currentPeriodEnd; иначе откатываемся на free.
  */
 export async function resolveActivePlan(userId: string): Promise<Plan> {
+  if (!isBillingEnforced()) {
+    return getBetaUnlimitedPlan();
+  }
+
   const subscription = await db.subscription.findUnique({ where: { userId } });
   if (!subscription || subscription.status !== "active") {
     return getPlan(DEFAULT_PLAN_ID);
