@@ -1,6 +1,6 @@
 import { generateAiReply, streamGenerateAiReply } from "@/lib/ai/ai-client";
 import { type ComposerIntent, classifyComposerIntent } from "@/lib/ai/composer-intent";
-import { buildStepLimitNotice, FLOW_AGENT_MAX_STEPS } from "@/lib/ai/flow-agent";
+import { FLOW_AGENT_MAX_STEPS } from "@/lib/ai/flow-agent";
 import type { FlowStreamCallbacks } from "@/lib/ai/flow-generator";
 import { generateFlowFromPrompt, refineFlowFromInstruction } from "@/lib/ai/flow-generator";
 import { answerProjectDataQuestion } from "@/lib/analytics/qa-agent";
@@ -66,10 +66,7 @@ function finalizeFlowAssistantMessage(
   transcript: ReturnType<typeof simulateFlow>["transcript"];
 } {
   const simulation = simulateFlow(flow);
-  const baseMessage = stepLimitReached
-    ? `${assistantMessage}\n\n${buildStepLimitNotice()}`
-    : assistantMessage;
-  const message = buildFlowCompletionReport(flow, baseMessage, ...contextParts, stepLimitReached);
+  const message = buildFlowCompletionReport(flow, assistantMessage, ...contextParts, stepLimitReached);
   const validationSummary = formatFlowValidationSummary([
     ...validateFlowDocument(flow),
     ...simulation.issues,

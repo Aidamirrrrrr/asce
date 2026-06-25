@@ -30,8 +30,8 @@ import { type SimulationIssue, simulateFlow } from "@/lib/flow/simulate-flow";
 import { type FlowValidationIssue, validateFlowDocument } from "@/lib/flow/validate-flow-document";
 import type { ProjectChatMessage } from "@/lib/projects";
 
-/** Максимум tool-вызовов агента за один запуск. */
-export const FLOW_AGENT_MAX_STEPS = 50;
+/** Максимум tool-вызовов агента за один запуск (create: сумма бюджетов фаз). */
+export const FLOW_AGENT_MAX_STEPS = 120;
 
 /** Скрытая инструкция для кнопки «Продолжить сборку». */
 export const FLOW_AGENT_CONTINUE_INSTRUCTION =
@@ -42,10 +42,10 @@ export function buildStepLimitNotice(): string {
   return `Достигнут лимит шагов агента (${FLOW_AGENT_MAX_STEPS}). Схема собрана частично — можно продолжить сборку.`;
 }
 
-const STRUCTURE_STEP_BUDGET = 25;
-const WIRING_STEP_BUDGET = 15;
-const CONTENT_STEP_BUDGET = 10;
-const REFINE_EDIT_STEP_BUDGET = 35;
+const STRUCTURE_STEP_BUDGET = 60;
+const WIRING_STEP_BUDGET = 30;
+const CONTENT_STEP_BUDGET = 30;
+const REFINE_EDIT_STEP_BUDGET = 80;
 const MAX_REPAIR_ROUNDS = 2;
 
 function emitPhase(
@@ -188,7 +188,6 @@ export async function runFlowAgentCreate(input: {
     });
     flow = structure.doc;
     totalSteps += structure.stepsUsed;
-    stepLimitReached ||= structure.stepLimitReached;
     emitPhase(input.callbacks, "structure", "done", `${flow.nodes.length} узлов`);
 
     emitPhase(input.callbacks, "wiring", "active");
@@ -205,7 +204,6 @@ export async function runFlowAgentCreate(input: {
     });
     flow = wiring.doc;
     totalSteps += wiring.stepsUsed;
-    stepLimitReached ||= wiring.stepLimitReached;
     emitPhase(input.callbacks, "wiring", "done");
 
     emitPhase(input.callbacks, "content", "active");
@@ -222,12 +220,9 @@ export async function runFlowAgentCreate(input: {
     });
     flow = content.doc;
     totalSteps += content.stepsUsed;
-    stepLimitReached ||= content.stepLimitReached;
     emitPhase(input.callbacks, "content", "done");
 
-    if (totalSteps >= FLOW_AGENT_MAX_STEPS) {
-      stepLimitReached = true;
-    }
+    stepLimitReached = totalSteps >= FLOW_AGENT_MAX_STEPS;
 
     flow = await validateAndRepair(flow, input.callbacks);
 
@@ -316,14 +311,11 @@ export async function runFlowAgentRefine(input: {
 
     let flow = edit.doc;
     totalSteps += edit.stepsUsed;
-    stepLimitReached ||= edit.stepLimitReached;
     emitPhase(input.callbacks, "structure", "done");
     emitPhase(input.callbacks, "wiring", "skipped");
     emitPhase(input.callbacks, "content", "skipped");
 
-    if (totalSteps >= FLOW_AGENT_MAX_STEPS) {
-      stepLimitReached = true;
-    }
+    stepLimitReached = totalSteps >= REFINE_EDIT_STEP_BUDGET;
 
     flow = await validateAndRepair(flow, input.callbacks);
 
