@@ -54,10 +54,7 @@ describe("executeFlowFromCallback via trigger", () => {
           },
         }),
       ],
-      edges: [
-        edge("t", "greet"),
-        edge("menu", "t", `btn-${backButtonId}`),
-      ],
+      edges: [edge("t", "greet"), edge("menu", "t", `btn-${backButtonId}`)],
     };
 
     const port = buildPort();

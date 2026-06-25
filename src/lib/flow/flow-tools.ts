@@ -1,6 +1,10 @@
 import { FLOW_BUS_EDGE_TYPE } from "@/lib/flow/branch-handle-utils";
 import { isValidSourceHandle } from "@/lib/flow/condition-node-utils";
-import { buttonLabelMatches, getBranchableMessageHandles, normalizeBranchLabel } from "@/lib/flow/flow-button-wiring";
+import {
+  buttonLabelMatches,
+  getBranchableMessageHandles,
+  normalizeBranchLabel,
+} from "@/lib/flow/flow-button-wiring";
 import {
   type BotFlowDocument,
   createDefaultNodeData,
@@ -270,7 +274,8 @@ export function addNode(
 export function deleteNode(doc: BotFlowDocument, nodeId: string): FlowToolResult {
   const target = doc.nodes.find((node) => node.id === nodeId);
   if (!target) {
-    const hint = doc.nodes.length > 0 ? ` Существующие id: ${doc.nodes.map((n) => n.id).join(", ")}` : "";
+    const hint =
+      doc.nodes.length > 0 ? ` Существующие id: ${doc.nodes.map((n) => n.id).join(", ")}` : "";
     return { ok: false, error: `Узел "${nodeId}" не найден.${hint}` };
   }
 
@@ -294,7 +299,8 @@ export function updateNode(
 ): FlowToolResult {
   const current = doc.nodes.find((node) => node.id === nodeId);
   if (!current) {
-    const hint = doc.nodes.length > 0 ? ` Существующие id: ${doc.nodes.map((n) => n.id).join(", ")}` : "";
+    const hint =
+      doc.nodes.length > 0 ? ` Существующие id: ${doc.nodes.map((n) => n.id).join(", ")}` : "";
     return { ok: false, error: `Узел "${nodeId}" не найден.${hint}` };
   }
 

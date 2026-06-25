@@ -402,7 +402,9 @@ export function sanitizeFlowDocument(doc: BotFlowDocument): BotFlowDocument {
   return {
     ...migrated,
     nodes,
-    edges: pruneInvalidEdges(nodes, migrated.edges).map(({ className: _className, ...edge }) => edge),
+    edges: pruneInvalidEdges(nodes, migrated.edges).map(
+      ({ className: _className, ...edge }) => edge,
+    ),
   };
 }
 
@@ -746,10 +748,7 @@ export function createDefaultNodeData(type: FlowNodeType): FlowNodeData {
         label: "Выбор",
         prompt: "Выберите вариант:",
         variableKey: "choice",
-        options: [
-          { text: "Вариант 1" },
-          { text: "Вариант 2" },
-        ],
+        options: [{ text: "Вариант 1" }, { text: "Вариант 2" }],
       };
     case "jump":
       return {

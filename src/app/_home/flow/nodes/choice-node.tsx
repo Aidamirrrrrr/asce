@@ -6,12 +6,9 @@ import { domAnimation, LazyMotion, m } from "motion/react";
 import { getNodeRevealMotionProps } from "@/app/_home/flow/node-reveal-motion";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { buildChoicePreview, normalizeChoiceNodeData } from "@/lib/flow/choice-node-utils";
 import { FLOW_NODE_CARD_CLASS, FLOW_NODE_CONTENT_CLASS } from "@/lib/flow/flow-layout";
 import type { ChoiceNodeData } from "@/lib/flow/flow-schema";
-import {
-  buildChoicePreview,
-  normalizeChoiceNodeData,
-} from "@/lib/flow/choice-node-utils";
 import { cn } from "@/lib/utils";
 
 export function ChoiceNode(props: NodeProps) {

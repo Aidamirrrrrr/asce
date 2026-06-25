@@ -11,8 +11,8 @@ import { useBotRuntime } from "@/app/_home/flow/use-bot-runtime";
 import { type FlowSaveStatus, useFlowPersistence } from "@/app/_home/flow/use-flow-persistence";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { BotFlowDocument } from "@/lib/flow/flow-schema";
 import { isStreamingSeedFlow } from "@/lib/flow/default-flow";
+import type { BotFlowDocument } from "@/lib/flow/flow-schema";
 
 type FlowCanvasPanelContentProps = {
   projectId: string;

@@ -1,4 +1,6 @@
+import type { AgentPhase, PhaseStatus } from "@/lib/ai/flow-agent-types";
 import type { BotFlowDocument } from "@/lib/flow/flow-schema";
+import type { TranscriptStep } from "@/lib/flow/simulate-flow";
 import type { ProjectChatMessage, ProjectSummary } from "@/lib/projects";
 
 export type FlowGenerationStreamEvent =
@@ -7,8 +9,10 @@ export type FlowGenerationStreamEvent =
   | { type: "intent"; intent: "flow" | "data" | "chat" }
   | { type: "started"; project: ProjectSummary }
   | { type: "plan"; items: string[] }
-  | { type: "plan_progress"; done: number[] }
+  | { type: "phase"; phase: AgentPhase; status: PhaseStatus; detail?: string }
   | { type: "flow"; flow: BotFlowDocument; nodeCount: number }
+  | { type: "transcript"; steps: TranscriptStep[] }
+  | { type: "validation"; errors: string[]; warnings: string[] }
   | { type: "assistant_delta"; delta: string }
   | { type: "assistant_reset" }
   | {
@@ -20,6 +24,7 @@ export type FlowGenerationStreamEvent =
       flowUpdated?: boolean;
       validationSummary?: string | null;
       stepLimitReached?: boolean;
+      transcript?: TranscriptStep[];
     }
   | { type: "error"; message: string };
 
@@ -42,8 +47,10 @@ export async function consumeFlowGenerationStream(
     onIntent?: (intent: "flow" | "data" | "chat") => void;
     onStarted?: (project: ProjectSummary) => void;
     onPlan?: (items: string[]) => void;
-    onPlanProgress?: (done: number[]) => void;
+    onPhase?: (phase: AgentPhase, status: PhaseStatus, detail?: string) => void;
     onFlow?: (flow: BotFlowDocument, nodeCount: number) => void;
+    onTranscript?: (steps: TranscriptStep[]) => void;
+    onValidation?: (errors: string[], warnings: string[]) => void;
     onAssistantDelta?: (delta: string) => void;
     onAssistantReset?: () => void;
     onComplete?: (event: Extract<FlowGenerationStreamEvent, { type: "complete" }>) => void;
@@ -121,11 +128,17 @@ export async function consumeFlowGenerationStream(
           case "plan":
             handlers.onPlan?.(payload.items);
             break;
-          case "plan_progress":
-            handlers.onPlanProgress?.(payload.done);
+          case "phase":
+            handlers.onPhase?.(payload.phase, payload.status, payload.detail);
             break;
           case "flow":
             handlers.onFlow?.(payload.flow, payload.nodeCount);
+            break;
+          case "transcript":
+            handlers.onTranscript?.(payload.steps);
+            break;
+          case "validation":
+            handlers.onValidation?.(payload.errors, payload.warnings);
             break;
           case "assistant_delta":
             handlers.onAssistantDelta?.(payload.delta);

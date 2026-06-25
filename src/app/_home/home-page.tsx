@@ -19,10 +19,13 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { SidebarInset, SidebarProvider, useSidebar } from "@/components/ui/sidebar";
 import { useIsMobile } from "@/hooks/use-mobile";
+import type { AgentPhase, PhaseStatus } from "@/lib/ai/flow-agent-types";
 import {
-  STREAMING_BUILD_PLAN_MESSAGE_ID,
-  upsertStreamingBuildPlanMessage,
-} from "@/lib/chat/build-plan-message";
+  createInitialPhaseStates,
+  STREAMING_AGENT_PROGRESS_MESSAGE_ID,
+  upsertPhaseState,
+  upsertStreamingAgentProgressMessage,
+} from "@/lib/chat/agent-progress-message";
 import {
   removeStreamingAssistantMessage,
   STREAMING_ASSISTANT_MESSAGE_ID,
@@ -30,6 +33,7 @@ import {
 } from "@/lib/chat/streaming-assistant-message";
 import { createStreamingSeedFlow } from "@/lib/flow/default-flow";
 import type { BotFlowDocument } from "@/lib/flow/flow-schema";
+import type { TranscriptStep } from "@/lib/flow/simulate-flow";
 import { duration, gentleEase } from "@/lib/motion";
 import type { ProjectChatMessage, ProjectSummary } from "@/lib/projects";
 import { createChatMessage } from "@/lib/projects";
@@ -80,8 +84,9 @@ function LauncherContent({
   onStreamFlow,
   onStreamIntent,
   onStreamPlan,
-  onStreamPlanProgress,
+  onStreamPhase,
   onStreamProgress,
+  onStreamTranscript,
   onStreamStatus,
   onStreamAssistantDelta,
   onStreamAssistantReset,
@@ -119,8 +124,9 @@ function LauncherContent({
   onStreamFlow: (flow: BotFlowDocument) => void;
   onStreamIntent: (intent: "flow" | "data" | "chat") => void;
   onStreamPlan: (items: string[]) => void;
-  onStreamPlanProgress: (done: number[]) => void;
+  onStreamPhase: (phase: AgentPhase, status: PhaseStatus, detail?: string) => void;
   onStreamProgress: (nodeCount: number) => void;
+  onStreamTranscript: (steps: TranscriptStep[]) => void;
   onStreamStatus: (message: string) => void;
   onStreamAssistantDelta: (delta: string) => void;
   onStreamAssistantReset: () => void;
@@ -244,8 +250,9 @@ function LauncherContent({
             onStreamFlow={onStreamFlow}
             onStreamIntent={onStreamIntent}
             onStreamPlan={onStreamPlan}
-            onStreamPlanProgress={onStreamPlanProgress}
+            onStreamPhase={onStreamPhase}
             onStreamProgress={onStreamProgress}
+            onStreamTranscript={onStreamTranscript}
             onStreamStatus={onStreamStatus}
             onStreamAssistantDelta={onStreamAssistantDelta}
             onStreamAssistantReset={onStreamAssistantReset}
@@ -485,50 +492,84 @@ export function HomePage({ initialProjects }: HomePageProps) {
 
   const handleStreamStatus = useCallback((message: string) => {
     setChatMessages((current) =>
-      upsertStreamingBuildPlanMessage(current, { statusLabel: message }),
+      upsertStreamingAgentProgressMessage(current, { statusLabel: message }),
+    );
+  }, []);
+
+  const handleStreamPhase = useCallback(
+    (phase: AgentPhase, status: PhaseStatus, detail?: string) => {
+      setChatMessages((current) => {
+        const progress = current.find(
+          (message) => message.id === STREAMING_AGENT_PROGRESS_MESSAGE_ID,
+        )?.meta?.agentProgress;
+        const phases = upsertPhaseState(
+          progress?.phases ?? createInitialPhaseStates(),
+          phase,
+          status,
+          detail,
+        );
+        return upsertStreamingAgentProgressMessage(current, { phases });
+      });
+    },
+    [],
+  );
+
+  const handleStreamTranscript = useCallback((steps: TranscriptStep[]) => {
+    setChatMessages((current) =>
+      upsertStreamingAgentProgressMessage(current, { transcript: steps }),
     );
   }, []);
 
   const handleStreamAssistantDelta = useCallback((delta: string) => {
     setChatMessages((current) => {
-      const withoutBuildPlan = current.filter(
-        (message) => message.id !== STREAMING_BUILD_PLAN_MESSAGE_ID,
+      const withoutProgress = current.filter(
+        (message) => message.id !== STREAMING_AGENT_PROGRESS_MESSAGE_ID,
       );
-      return upsertStreamingAssistantMessage(withoutBuildPlan, { append: delta });
+      return upsertStreamingAssistantMessage(withoutProgress, { append: delta });
     });
   }, []);
 
   const handleStreamAssistantReset = useCallback(() => {
     setChatMessages((current) => {
       const withoutAssistant = removeStreamingAssistantMessage(current);
-      return upsertStreamingBuildPlanMessage(withoutAssistant, { statusLabel: "Ищу данные…" });
+      return upsertStreamingAgentProgressMessage(withoutAssistant, {
+        statusLabel: "Ищу данные…",
+      });
     });
   }, []);
 
   const handleStreamPlan = useCallback((items: string[]) => {
     setChatMessages((current) =>
-      upsertStreamingBuildPlanMessage(current, { items, done: [], nodeCount: 0 }),
+      upsertStreamingAgentProgressMessage(current, { planSteps: items }),
     );
   }, []);
 
-  const handleStreamPlanProgress = useCallback((done: number[]) => {
-    setChatMessages((current) => upsertStreamingBuildPlanMessage(current, { done }));
-  }, []);
-
   const handleStreamProgress = useCallback((nodeCount: number) => {
-    setChatMessages((current) => upsertStreamingBuildPlanMessage(current, { nodeCount }));
+    setChatMessages((current) => upsertStreamingAgentProgressMessage(current, { nodeCount }));
   }, []);
 
-  const handleGenerationCancel = useCallback(() => {
+  const handleGenerationCancel = useCallback(async () => {
+    const projectIdToDelete = streamingProjectId;
     setChatMessages((current) =>
       current.filter(
         (message) =>
           message.id !== "streaming-user" &&
-          message.id !== STREAMING_BUILD_PLAN_MESSAGE_ID &&
+          message.id !== STREAMING_AGENT_PROGRESS_MESSAGE_ID &&
           message.id !== STREAMING_ASSISTANT_MESSAGE_ID,
       ),
     );
-  }, []);
+    if (projectIdToDelete) {
+      try {
+        await fetch(`/api/projects/${projectIdToDelete}`, { method: "DELETE" });
+        setProjects((current) => current.filter((item) => item.id !== projectIdToDelete));
+        if (activeProjectId === projectIdToDelete) {
+          requestCloseProject();
+        }
+      } catch {
+        // ignore cleanup errors on cancel
+      }
+    }
+  }, [activeProjectId, requestCloseProject, streamingProjectId]);
 
   const handleProjectCreated = useCallback(
     (result: {
@@ -567,7 +608,7 @@ export function HomePage({ initialProjects }: HomePageProps) {
       const userMessage = streamingUserMessageRef.current?.trim() || project.prompt?.trim() || "";
       setChatMessages([
         ...(userMessage ? [createChatMessage("user", userMessage)] : []),
-        ...upsertStreamingBuildPlanMessage([], { statusLabel: "Генерируем сценарий…" }),
+        ...upsertStreamingAgentProgressMessage([], { statusLabel: "Генерируем сценарий…" }),
       ]);
       requestOpenProject(project.id);
     },
@@ -583,7 +624,7 @@ export function HomePage({ initialProjects }: HomePageProps) {
         }
         setChatMessages((current) =>
           removeStreamingAssistantMessage(
-            upsertStreamingBuildPlanMessage(current, { statusLabel: "Обновляем сценарий…" }),
+            upsertStreamingAgentProgressMessage(current, { statusLabel: "Обновляем сценарий…" }),
           ),
         );
         return;
@@ -591,7 +632,7 @@ export function HomePage({ initialProjects }: HomePageProps) {
 
       setChatMessages((current) =>
         removeStreamingAssistantMessage(
-          upsertStreamingBuildPlanMessage(current, {
+          upsertStreamingAgentProgressMessage(current, {
             statusLabel: intent === "data" ? "Ищу данные…" : "Думаю…",
           }),
         ),
@@ -631,7 +672,7 @@ export function HomePage({ initialProjects }: HomePageProps) {
           }
 
           next = removeStreamingAssistantMessage(next);
-          next = upsertStreamingBuildPlanMessage(next, {
+          next = upsertStreamingAgentProgressMessage(next, {
             statusLabel: options?.silent
               ? "Продолжаем сборку…"
               : options?.forceFlow
@@ -840,8 +881,9 @@ export function HomePage({ initialProjects }: HomePageProps) {
       onStreamFlow={handleStreamFlow}
       onStreamIntent={handleStreamIntent}
       onStreamPlan={handleStreamPlan}
-      onStreamPlanProgress={handleStreamPlanProgress}
+      onStreamPhase={handleStreamPhase}
       onStreamProgress={handleStreamProgress}
+      onStreamTranscript={handleStreamTranscript}
       onStreamStatus={handleStreamStatus}
       onStreamAssistantDelta={handleStreamAssistantDelta}
       onStreamAssistantReset={handleStreamAssistantReset}

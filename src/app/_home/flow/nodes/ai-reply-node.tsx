@@ -9,10 +9,6 @@ export function AiReplyNode(props: NodeProps) {
   const data = props.data as AiReplyNodeData;
 
   return (
-    <BaseNode
-      {...props}
-      icon={SparklesIcon}
-      preview={data.systemPrompt || "Без system prompt"}
-    />
+    <BaseNode {...props} icon={SparklesIcon} preview={data.systemPrompt || "Без system prompt"} />
   );
 }

@@ -6,8 +6,6 @@ import {
 import { normalizeAdminNotifyNodeData } from "@/lib/flow/admin-notify-node-utils";
 import { normalizeChoiceNodeData } from "@/lib/flow/choice-node-utils";
 import { createConditionRuleId, normalizeConditionNodeData } from "@/lib/flow/condition-node-utils";
-import { normalizeFormNodeData } from "@/lib/flow/form-node-utils";
-import { normalizeJumpNodeData } from "@/lib/flow/jump-node-utils";
 import {
   findBestButtonTarget,
   getBranchableMessageHandles,
@@ -33,8 +31,10 @@ import {
   sanitizeFlowDocument,
   type TriggerNodeData,
 } from "@/lib/flow/flow-schema";
+import { normalizeFormNodeData } from "@/lib/flow/form-node-utils";
 import { normalizeHttpRequestNodeData } from "@/lib/flow/http-request-node-utils";
 import { normalizeJsonExtractNodeData } from "@/lib/flow/json-extract-node-utils";
+import { normalizeJumpNodeData } from "@/lib/flow/jump-node-utils";
 import { createMessageButtonId, normalizeMessageNodeData } from "@/lib/flow/message-node-utils";
 import { normalizeSaveRecordNodeData } from "@/lib/flow/save-record-node-utils";
 import {

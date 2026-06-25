@@ -7,6 +7,11 @@ import { executeHttpRequestNode } from "@/lib/bot/http-request-executor";
 import type { InputWaitSession } from "@/lib/bot/input-wait-session";
 import { setUserVar } from "@/lib/bot/user-variables";
 import { normalizeAdminNotifyNodeData } from "@/lib/flow/admin-notify-node-utils";
+import {
+  buildChoiceKeyboard,
+  normalizeChoiceNodeData,
+  resolveChoiceValue,
+} from "@/lib/flow/choice-node-utils";
 import { normalizeConditionNodeData } from "@/lib/flow/condition-node-utils";
 import type {
   AdminNotifyNodeData,
@@ -17,19 +22,14 @@ import type {
   FlowNode,
   FormNodeData,
   HttpRequestNodeData,
-  JumpNodeData,
   JsonExtractNodeData,
+  JumpNodeData,
   MessageNodeData,
   SaveRecordNodeData,
   SetVariableNodeData,
   TriggerNodeData,
   WaitInputNodeData,
 } from "@/lib/flow/flow-schema";
-import {
-  buildChoiceKeyboard,
-  normalizeChoiceNodeData,
-  resolveChoiceValue,
-} from "@/lib/flow/choice-node-utils";
 import {
   buildContactRequestKeyboard,
   normalizeFormNodeData,
@@ -438,8 +438,7 @@ async function sendFormQuestion(
   formNodeId: string,
   port: FlowOutboundPort,
 ): Promise<void> {
-  const keyboard =
-    question.type === "contact" ? buildContactRequestKeyboard() : undefined;
+  const keyboard = question.type === "contact" ? buildContactRequestKeyboard() : undefined;
   await port.sendMessage(
     { text: question.prompt, parseMode: "HTML", keyboard },
     { nodeId: formNodeId },
@@ -533,10 +532,7 @@ async function walkFromNode(
     const text = data.prompt?.trim()
       ? interpolateTemplate(data.prompt, port.executionContext.vars, data.parseMode ?? "HTML")
       : data.prompt;
-    await port.sendMessage(
-      { text, parseMode: data.parseMode, keyboard },
-      { nodeId: node.id },
-    );
+    await port.sendMessage({ text, parseMode: data.parseMode, keyboard }, { nodeId: node.id });
     // Ждём callback — выполнение прекращается до нажатия кнопки
     return;
   }

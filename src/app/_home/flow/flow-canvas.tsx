@@ -209,7 +209,7 @@ function FlowEditorInner({
             opacity: isBack ? 0 : isFlowGenerating || revealed ? 1 : 0,
             pointerEvents: isBack ? ("none" as const) : undefined,
             transition:
-              !isBack && !isFlowGenerating && revealed
+              !(isBack || isFlowGenerating) && revealed
                 ? `opacity ${duration.slow}s ease ${0.12 + index * 0.05}s`
                 : undefined,
           },

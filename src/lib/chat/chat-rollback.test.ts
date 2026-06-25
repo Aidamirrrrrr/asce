@@ -40,7 +40,10 @@ describe("chat rollback", () => {
       }),
     ];
 
-    const state = resolveRollbackState(messagesWithUserSnapshot, messagesWithUserSnapshot[2]?.id ?? "");
+    const state = resolveRollbackState(
+      messagesWithUserSnapshot,
+      messagesWithUserSnapshot[2]?.id ?? "",
+    );
     expect(state?.messages).toHaveLength(3);
     expect(state?.flow.name).toBe("B");
   });

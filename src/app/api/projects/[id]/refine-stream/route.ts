@@ -2,15 +2,18 @@ import { NextResponse } from "next/server";
 import { runQueued } from "@/lib/ai/ai-queue";
 import { classifyComposerIntent } from "@/lib/ai/composer-intent";
 import { resolveComposerTurn } from "@/lib/ai/composer-turn";
-import { FLOW_AGENT_CONTINUE_INSTRUCTION } from "@/lib/ai/flow-agent-continue";
+import { FLOW_AGENT_CONTINUE_INSTRUCTION } from "@/lib/ai/flow-agent";
 import { flowAgentLog } from "@/lib/ai/flow-agent-log";
+import { buildAgentStreamCallbacks } from "@/lib/ai/flow-agent-stream-callbacks";
 import {
   betaQueueMessage,
   encodeFlowGenerationSse,
   type FlowGenerationStreamEvent,
 } from "@/lib/ai/flow-generation-stream";
 import { getOwnedProject, requireUser } from "@/lib/auth/session";
+import { assertAiQuota } from "@/lib/billing/ai-usage";
 import { runWithAiUsage } from "@/lib/billing/ai-usage-context";
+import { isAiQuotaExceededError } from "@/lib/billing/errors";
 import { syncFlowSecretDeclarations } from "@/lib/bot/project-secrets";
 import { stopProjectBot } from "@/lib/bot/runtime-registry";
 import { db } from "@/lib/db";
@@ -41,6 +44,15 @@ export async function POST(request: Request, context: RouteContext) {
       { error: "Слишком много запросов к ИИ. Попробуйте позже." },
       { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds ?? 60) } },
     );
+  }
+
+  try {
+    await assertAiQuota(authResult.userId);
+  } catch (error) {
+    if (isAiQuotaExceededError(error)) {
+      return NextResponse.json({ error: error.message }, { status: 402 });
+    }
+    throw error;
   }
 
   const body = (await request.json()) as {
@@ -115,17 +127,7 @@ export async function POST(request: Request, context: RouteContext) {
                   intent,
                   callbacks:
                     intent === "flow"
-                      ? {
-                          onPartialFlow: (flow, nodeCount) => {
-                            send({ type: "flow", flow, nodeCount });
-                          },
-                          onPlan: (items) => {
-                            send({ type: "plan", items });
-                          },
-                          onPlanProgress: (done) => {
-                            send({ type: "plan_progress", done });
-                          },
-                        }
+                      ? buildAgentStreamCallbacks(send)
                       : {
                           onAssistantDelta: (delta) => {
                             send({ type: "assistant_delta", delta });
@@ -183,6 +185,7 @@ export async function POST(request: Request, context: RouteContext) {
           flowUpdated: true,
           validationSummary: result.validationSummary,
           stepLimitReached: result.stepLimitReached,
+          transcript: result.transcript,
         });
         flowAgentLog("stream refine complete", {
           projectId: id,

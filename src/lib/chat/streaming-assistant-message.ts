@@ -38,6 +38,8 @@ export function upsertStreamingAssistantMessage(
   return [...messages, nextMessage];
 }
 
-export function removeStreamingAssistantMessage(messages: ProjectChatMessage[]): ProjectChatMessage[] {
+export function removeStreamingAssistantMessage(
+  messages: ProjectChatMessage[],
+): ProjectChatMessage[] {
   return messages.filter((message) => message.id !== STREAMING_ASSISTANT_MESSAGE_ID);
 }

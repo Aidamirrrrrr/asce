@@ -1,13 +1,16 @@
 import { runQueued } from "@/lib/ai/ai-queue";
 import { resolveCreateComposerTurn } from "@/lib/ai/composer-turn";
 import { flowAgentLog } from "@/lib/ai/flow-agent-log";
+import { buildAgentStreamCallbacks } from "@/lib/ai/flow-agent-stream-callbacks";
 import {
   betaQueueMessage,
   encodeFlowGenerationSse,
   type FlowGenerationStreamEvent,
 } from "@/lib/ai/flow-generation-stream";
 import { requireUser } from "@/lib/auth/session";
+import { assertAiQuota } from "@/lib/billing/ai-usage";
 import { runWithAiUsage } from "@/lib/billing/ai-usage-context";
+import { isAiQuotaExceededError } from "@/lib/billing/errors";
 import { getDefaultDeliveryMode } from "@/lib/bot/config";
 import { syncFlowSecretDeclarations } from "@/lib/bot/project-secrets";
 import { generateWebhookSecret } from "@/lib/bot/webhook-secret";
@@ -31,6 +34,15 @@ export async function POST(request: Request) {
       { error: "Слишком много запросов к ИИ. Попробуйте позже." },
       { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds ?? 60) } },
     );
+  }
+
+  try {
+    await assertAiQuota(authResult.userId);
+  } catch (error) {
+    if (isAiQuotaExceededError(error)) {
+      return Response.json({ error: error.message }, { status: 402 });
+    }
+    throw error;
   }
 
   const body = (await request.json()) as { prompt?: string };
@@ -84,17 +96,7 @@ export async function POST(request: Request) {
                 resolveCreateComposerTurn({
                   prompt,
                   projectId: draftProject.id,
-                  callbacks: {
-                    onPartialFlow: (flow, nodeCount) => {
-                      send({ type: "flow", flow, nodeCount });
-                    },
-                    onPlan: (items) => {
-                      send({ type: "plan", items });
-                    },
-                    onPlanProgress: (done) => {
-                      send({ type: "plan_progress", done });
-                    },
-                  },
+                  callbacks: buildAgentStreamCallbacks(send),
                 }),
               {
                 onQueued: (position) =>
@@ -124,6 +126,7 @@ export async function POST(request: Request) {
           flowUpdated: true,
           validationSummary: result.validationSummary,
           stepLimitReached: result.stepLimitReached,
+          transcript: result.transcript,
         });
         flowAgentLog("stream create complete", {
           projectId: project.id,

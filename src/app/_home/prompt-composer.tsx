@@ -11,8 +11,10 @@ import { GradientText } from "@/components/ui/gradient-text";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useModKeyLabel } from "@/hooks/use-mod-key-label";
+import type { AgentPhase, PhaseStatus } from "@/lib/ai/flow-agent-types";
 import { consumeFlowGenerationStream } from "@/lib/ai/flow-generation-stream";
 import type { BotFlowDocument } from "@/lib/flow/flow-schema";
+import type { TranscriptStep } from "@/lib/flow/simulate-flow";
 import { duration, gentleEase } from "@/lib/motion";
 import type { ProjectChatMessage, ProjectSummary } from "@/lib/projects";
 import { cn } from "@/lib/utils";
@@ -43,8 +45,9 @@ type PromptComposerProps = {
   onStreamFlow?: (flow: BotFlowDocument) => void;
   onStreamIntent?: (intent: "flow" | "data" | "chat") => void;
   onStreamPlan?: (items: string[]) => void;
-  onStreamPlanProgress?: (done: number[]) => void;
+  onStreamPhase?: (phase: AgentPhase, status: PhaseStatus, detail?: string) => void;
   onStreamProgress?: (nodeCount: number) => void;
+  onStreamTranscript?: (steps: TranscriptStep[]) => void;
   onStreamStatus?: (message: string) => void;
   onStreamAssistantDelta?: (delta: string) => void;
   onStreamAssistantReset?: () => void;
@@ -84,8 +87,9 @@ export const PromptComposer = forwardRef<PromptComposerHandle, PromptComposerPro
       onStreamFlow,
       onStreamIntent,
       onStreamPlan,
-      onStreamPlanProgress,
+      onStreamPhase,
       onStreamProgress,
+      onStreamTranscript,
       onStreamStatus,
       onStreamAssistantDelta,
       onStreamAssistantReset,
@@ -138,7 +142,6 @@ export const PromptComposer = forwardRef<PromptComposerHandle, PromptComposerPro
             onStatus: (message) => onStreamStatus?.(message),
             onQueue: (message) => {
               onStreamStatus?.(message);
-              toast.message(message);
             },
             onIntent: (intent) => {
               completedIntent = intent;
@@ -149,7 +152,8 @@ export const PromptComposer = forwardRef<PromptComposerHandle, PromptComposerPro
               onStreamProgress?.(nodeCount);
             },
             onPlan: (items) => onStreamPlan?.(items),
-            onPlanProgress: (done) => onStreamPlanProgress?.(done),
+            onPhase: (phase, status, detail) => onStreamPhase?.(phase, status, detail),
+            onTranscript: (steps) => onStreamTranscript?.(steps),
             onAssistantDelta: (delta) => onStreamAssistantDelta?.(delta),
             onAssistantReset: () => onStreamAssistantReset?.(),
             onComplete: (event) => {
@@ -176,7 +180,7 @@ export const PromptComposer = forwardRef<PromptComposerHandle, PromptComposerPro
         );
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
-          onGenerationCancel?.();
+          void onGenerationCancel?.();
           if (!silentAbortRef.current) {
             toast.message("Запрос отменён");
           }
@@ -185,6 +189,7 @@ export const PromptComposer = forwardRef<PromptComposerHandle, PromptComposerPro
         }
 
         toast.error(error instanceof Error ? error.message : "Не удалось выполнить запрос");
+        void onGenerationCancel?.();
       } finally {
         abortControllerRef.current = null;
         setIsSubmitting(false);
@@ -212,7 +217,6 @@ export const PromptComposer = forwardRef<PromptComposerHandle, PromptComposerPro
             onStatus: (message) => onStreamStatus?.(message),
             onQueue: (message) => {
               onStreamStatus?.(message);
-              toast.message(message);
             },
             onStarted: (project) => {
               onStreamStarted?.(project);
@@ -222,7 +226,8 @@ export const PromptComposer = forwardRef<PromptComposerHandle, PromptComposerPro
               onStreamProgress?.(nodeCount);
             },
             onPlan: (items) => onStreamPlan?.(items),
-            onPlanProgress: (done) => onStreamPlanProgress?.(done),
+            onPhase: (phase, status, detail) => onStreamPhase?.(phase, status, detail),
+            onTranscript: (steps) => onStreamTranscript?.(steps),
             onComplete: (event) => {
               setPrompt("");
               onCreated({
@@ -241,7 +246,7 @@ export const PromptComposer = forwardRef<PromptComposerHandle, PromptComposerPro
         );
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
-          onGenerationCancel?.();
+          void onGenerationCancel?.();
           if (!silentAbortRef.current) {
             toast.message("Запрос отменён");
           }
@@ -250,6 +255,7 @@ export const PromptComposer = forwardRef<PromptComposerHandle, PromptComposerPro
         }
 
         toast.error(error instanceof Error ? error.message : "Не удалось выполнить запрос");
+        void onGenerationCancel?.();
       } finally {
         abortControllerRef.current = null;
         setIsSubmitting(false);

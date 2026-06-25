@@ -5,25 +5,26 @@ import { createChatMessage } from "@/lib/projects";
 
 const EPHEMERAL_MESSAGE_IDS = new Set([
   "streaming-user",
-  "streaming-build-plan",
+  "streaming-agent-progress",
   "streaming-assistant",
 ]);
 
 export function isEphemeralChatMessage(message: ProjectChatMessage): boolean {
-  return EPHEMERAL_MESSAGE_IDS.has(message.id) || Boolean(message.meta?.streaming);
+  return (
+    EPHEMERAL_MESSAGE_IDS.has(message.id) ||
+    Boolean(message.meta?.streaming) ||
+    Boolean(message.meta?.agentProgress)
+  );
 }
 
-export function canRollbackToMessage(
-  messages: ProjectChatMessage[],
-  messageId: string,
-): boolean {
+export function canRollbackToMessage(messages: ProjectChatMessage[], messageId: string): boolean {
   const index = messages.findIndex((message) => message.id === messageId);
   if (index < 0) {
     return false;
   }
 
   const target = messages[index];
-  if (!target || isEphemeralChatMessage(target) || target.meta?.buildPlan) {
+  if (!target || isEphemeralChatMessage(target)) {
     return false;
   }
 
@@ -55,11 +56,7 @@ export function resolveFlowSnapshotAtIndex(
     return target.meta.flowSnapshot;
   }
 
-  if (
-    target.role === "assistant" &&
-    target.meta?.flowSnapshot &&
-    !target.meta?.buildPlan
-  ) {
+  if (target.role === "assistant" && target.meta?.flowSnapshot) {
     return target.meta.flowSnapshot;
   }
 
@@ -73,11 +70,7 @@ export function resolveFlowSnapshotAtIndex(
       return message.meta.flowSnapshot;
     }
 
-    if (
-      message.role === "assistant" &&
-      message.meta?.flowSnapshot &&
-      !message.meta?.buildPlan
-    ) {
+    if (message.role === "assistant" && message.meta?.flowSnapshot) {
       return message.meta.flowSnapshot;
     }
   }

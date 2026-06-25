@@ -321,21 +321,46 @@ export async function generateStructuredJson(
       withJsonMode ? { ...baseParams, response_format: { type: "json_object" } } : baseParams,
     );
 
-  let response: ChatCompletion;
-  try {
-    response = await attempt(jsonMode);
-  } catch (error) {
-    // Эндпоинт не принял response_format — мягкий откат без него.
-    if (jsonMode && error instanceof OpenAI.APIError && error.status === 400) {
-      flowAgentWarn("structured json mode unsupported, falling back", {
-        message: error.message,
-      });
-      response = await attempt(false);
-    } else if (error instanceof OpenAI.APIError) {
-      throw new Error(`AI API: ${error.message}`);
-    } else {
-      throw error;
+  const maxRetries = getLlmMaxRetries();
+  let response: ChatCompletion | undefined;
+  let lastError: unknown;
+
+  for (let retryAttempt = 1; retryAttempt <= maxRetries; retryAttempt += 1) {
+    try {
+      response = await attempt(jsonMode);
+      break;
+    } catch (error) {
+      lastError = error;
+      // Эндпоинт не принял response_format — мягкий откат без него.
+      if (jsonMode && error instanceof OpenAI.APIError && error.status === 400) {
+        flowAgentWarn("structured json mode unsupported, falling back", {
+          message: error.message,
+        });
+        try {
+          response = await attempt(false);
+          break;
+        } catch (fallbackError) {
+          lastError = fallbackError;
+        }
+      }
+      if (retryAttempt < maxRetries && isRetryableLlmError(lastError)) {
+        const delayMs = getLlmRetryBaseMs() * 2 ** (retryAttempt - 1);
+        flowAgentWarn("structured json retry", { attempt: retryAttempt, delayMs });
+        await sleep(delayMs);
+        continue;
+      }
+      if (lastError instanceof OpenAI.APIError) {
+        throw new Error(`AI API: ${lastError.message}`);
+      }
+      throw lastError;
     }
+  }
+
+  if (!response) {
+    if (lastError instanceof OpenAI.APIError) {
+      throw new Error(`AI API: ${lastError.message}`);
+    }
+    throw lastError ?? new Error("AI API: пустой ответ");
   }
 
   meterUsage(response);

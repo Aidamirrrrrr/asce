@@ -4,7 +4,12 @@ import type {
   ChatCompletionTool,
 } from "openai/resources/chat/completions";
 
-import { createStreamingChatCompletion, getAiClient, getAiModel, meterChatUsage } from "@/lib/ai/ai-client";
+import {
+  createStreamingChatCompletion,
+  getAiClient,
+  getAiModel,
+  meterChatUsage,
+} from "@/lib/ai/ai-client";
 import {
   activeUsers,
   countUsers,

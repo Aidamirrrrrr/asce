@@ -40,50 +40,58 @@ function chunkedSseResponse(events: FlowGenerationStreamEvent[]): Response {
 }
 
 describe("encodeFlowGenerationSse", () => {
-  it("serializes plan and plan_progress events", () => {
-    expect(encodeFlowGenerationSse({ type: "plan", items: ["Старт", "Меню"] })).toBe(
-      'data: {"type":"plan","items":["Старт","Меню"]}\n\n',
+  it("serializes phase and transcript events", () => {
+    expect(encodeFlowGenerationSse({ type: "phase", phase: "plan", status: "active" })).toContain(
+      '"type":"phase"',
     );
-    expect(encodeFlowGenerationSse({ type: "plan_progress", done: [0, 2] })).toBe(
-      'data: {"type":"plan_progress","done":[0,2]}\n\n',
-    );
+    expect(
+      encodeFlowGenerationSse({
+        type: "transcript",
+        steps: [{ nodeId: "m1", type: "message", label: "Привет", text: "Здравствуйте" }],
+      }),
+    ).toContain('"type":"transcript"');
   });
 });
 
 describe("consumeFlowGenerationStream", () => {
-  it("dispatches status, plan, and plan_progress handlers", async () => {
+  it("dispatches status, plan, and phase handlers", async () => {
     const onStatus = vi.fn();
     const onPlan = vi.fn();
-    const onPlanProgress = vi.fn();
+    const onPhase = vi.fn();
 
     await consumeFlowGenerationStream(
       sseResponse([
         { type: "status", message: "Генерируем сценарий..." },
         { type: "plan", items: ["Старт", "Меню"] },
-        { type: "plan_progress", done: [0] },
+        { type: "phase", phase: "structure", status: "active" },
       ]),
-      { onStatus, onPlan, onPlanProgress },
+      { onStatus, onPlan, onPhase },
     );
 
     expect(onStatus).toHaveBeenCalledWith("Генерируем сценарий...");
     expect(onPlan).toHaveBeenCalledWith(["Старт", "Меню"]);
-    expect(onPlanProgress).toHaveBeenCalledWith([0]);
+    expect(onPhase).toHaveBeenCalledWith("structure", "active", undefined);
   });
 
   it("parses SSE split across multiple chunks", async () => {
-    const onPlan = vi.fn();
-    const onPlanProgress = vi.fn();
+    const onTranscript = vi.fn();
+    const onValidation = vi.fn();
 
     await consumeFlowGenerationStream(
       chunkedSseResponse([
-        { type: "plan", items: ["A", "B", "C"] },
-        { type: "plan_progress", done: [0, 1] },
+        {
+          type: "transcript",
+          steps: [{ nodeId: "m1", type: "message", label: "A", text: "B" }],
+        },
+        { type: "validation", errors: [], warnings: ["hint"] },
       ]),
-      { onPlan, onPlanProgress },
+      { onTranscript, onValidation },
     );
 
-    expect(onPlan).toHaveBeenCalledWith(["A", "B", "C"]);
-    expect(onPlanProgress).toHaveBeenCalledWith([0, 1]);
+    expect(onTranscript).toHaveBeenCalledWith([
+      { nodeId: "m1", type: "message", label: "A", text: "B" },
+    ]);
+    expect(onValidation).toHaveBeenCalledWith([], ["hint"]);
   });
 
   it("dispatches assistant_delta and assistant_reset handlers", async () => {
@@ -91,10 +99,7 @@ describe("consumeFlowGenerationStream", () => {
     const onAssistantReset = vi.fn();
 
     await consumeFlowGenerationStream(
-      sseResponse([
-        { type: "assistant_delta", delta: "Привет" },
-        { type: "assistant_reset" },
-      ]),
+      sseResponse([{ type: "assistant_delta", delta: "Привет" }, { type: "assistant_reset" }]),
       { onAssistantDelta, onAssistantReset },
     );
 

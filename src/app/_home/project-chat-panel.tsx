@@ -1,20 +1,15 @@
 "use client";
 
-import {
-  BotIcon,
-  CheckIcon,
-  CopyIcon,
-  HistoryIcon,
-  Loader2Icon,
-  MessageSquarePlusIcon,
-  UserIcon,
-} from "lucide-react";
+import { BotIcon, CopyIcon, HistoryIcon, MessageSquarePlusIcon, UserIcon } from "lucide-react";
 import { m } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { ChatActionCardPanel } from "@/app/_home/chat-action-card";
 import { ChatMarkdown } from "@/app/_home/chat-markdown";
+import { CompletionSummary } from "@/app/_home/completion-summary";
+import { DialogPreview } from "@/app/_home/dialog-preview";
+import { GenerationProgress } from "@/app/_home/generation-progress";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,9 +24,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { buildStepLimitNotice } from "@/lib/ai/flow-agent-continue";
+import { STREAMING_AGENT_PROGRESS_MESSAGE_ID } from "@/lib/chat/agent-progress-message";
 import { canRollbackToMessage } from "@/lib/chat/chat-rollback";
-import type { ChatBuildPlanState } from "@/lib/chat/build-plan-message";
 import { duration, gentleEase } from "@/lib/motion";
 import type { ProjectChatMessage, ProjectSummary } from "@/lib/projects";
 import { cn } from "@/lib/utils";
@@ -54,66 +48,6 @@ function ThinkingDots({ label }: { label: string }) {
   );
 }
 
-function BuildPlanChecklist({ plan }: { plan: ChatBuildPlanState }) {
-  const done = new Set(plan.done);
-  const currentIndex = plan.items.findIndex((_, index) => !done.has(index));
-  const isActive = plan.status === "active";
-
-  if (plan.items.length === 0) {
-    return (
-      <div className="text-sm text-muted-foreground">
-        <ThinkingDots label={plan.statusLabel || "Думаю"} />
-        {plan.nodeCount > 0 ? (
-          <span className="ml-2 text-xs text-muted-foreground/70">· узлов: {plan.nodeCount}</span>
-        ) : null}
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-        {isActive ? <Loader2Icon className="size-3.5 animate-spin text-primary" /> : null}
-        <span>{isActive ? "Собираю сценарий" : "План сборки"}</span>
-        <span className="text-muted-foreground/60">
-          · {done.size}/{plan.items.length}
-          {plan.nodeCount > 0 ? ` · ${plan.nodeCount} узл.` : ""}
-        </span>
-      </div>
-      <ul className="space-y-1.5">
-        {plan.items.map((item, index) => {
-          const isDone = done.has(index);
-          const isCurrent = isActive && index === currentIndex;
-          return (
-            <li
-              key={`${index}-${item}`}
-              className={cn(
-                "flex items-start gap-2 text-sm leading-snug transition-colors",
-                isDone
-                  ? "text-muted-foreground line-through decoration-muted-foreground/40"
-                  : isCurrent
-                    ? "text-foreground"
-                    : "text-muted-foreground/70",
-              )}
-            >
-              <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center">
-                {isDone ? (
-                  <CheckIcon className="size-3.5 text-primary" />
-                ) : isCurrent ? (
-                  <Loader2Icon className="size-3.5 animate-spin text-primary" />
-                ) : (
-                  <span className="size-2.5 rounded-full border border-muted-foreground/40" />
-                )}
-              </span>
-              <span className="min-w-0">{item}</span>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
-}
-
 type ProjectChatPanelProps = {
   project: ProjectSummary;
   messages: ProjectChatMessage[];
@@ -124,37 +58,6 @@ type ProjectChatPanelProps = {
   onRollback?: (messageId: string) => Promise<void>;
   isRollbackDisabled?: boolean;
 };
-
-function StepLimitBanner({
-  onContinue,
-  disabled,
-}: {
-  onContinue?: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-sm text-foreground">
-      <p className="leading-relaxed text-amber-950 dark:text-amber-50">{buildStepLimitNotice()}</p>
-      <Button type="button" size="sm" className="mt-2" disabled={disabled} onClick={onContinue}>
-        Продолжить
-      </Button>
-    </div>
-  );
-}
-
-function isActiveStepLimitMessage(
-  messages: ProjectChatMessage[],
-  message: ProjectChatMessage,
-): boolean {
-  if (!message.meta?.stepLimitReached) {
-    return false;
-  }
-
-  const lastAssistant = [...messages]
-    .reverse()
-    .find((item) => item.role === "assistant" && !item.meta?.buildPlan && !item.meta?.streaming);
-  return lastAssistant?.id === message.id;
-}
 
 function ChatMessageActions({
   message,
@@ -200,7 +103,7 @@ function ChatMessageActions({
     }
   }
 
-  if (!canCopy && !canRollback) {
+  if (!(canCopy || canRollback)) {
     return null;
   }
 
@@ -208,7 +111,7 @@ function ChatMessageActions({
     <>
       <div
         className={cn(
-          "absolute top-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover/message:opacity-100",
+          "absolute top-1 flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover/message:opacity-100",
           isUser ? "-left-1 -translate-x-full" : "-right-1 translate-x-full",
         )}
       >
@@ -290,11 +193,12 @@ function ChatMessageRow({
   isRollbackDisabled?: boolean;
 }) {
   const isUser = message.role === "user";
-  const showStepLimit = isActiveStepLimitMessage(messages, message);
   const actionCard = message.meta?.actionCard;
-  const buildPlan = message.meta?.buildPlan;
+  const agentProgress = message.meta?.agentProgress;
   const isStreaming = message.meta?.streaming === true;
-  const showActions = !buildPlan && !isStreaming;
+  const showActions =
+    message.id !== STREAMING_AGENT_PROGRESS_MESSAGE_ID && !isStreaming && !agentProgress;
+  const showStepLimit = Boolean(message.meta?.stepLimitReached);
 
   return (
     <m.div
@@ -330,8 +234,13 @@ function ChatMessageRow({
         >
           {isUser ? (
             <p className="whitespace-pre-wrap">{message.content}</p>
-          ) : buildPlan ? (
-            <BuildPlanChecklist plan={buildPlan} />
+          ) : agentProgress ? (
+            <GenerationProgress
+              phases={agentProgress.phases}
+              planSteps={agentProgress.planSteps}
+              nodeCount={agentProgress.nodeCount}
+              statusLabel={agentProgress.statusLabel}
+            />
           ) : isStreaming && !message.content.trim() ? (
             <ThinkingDots label="Думаю" />
           ) : (
@@ -356,7 +265,20 @@ function ChatMessageRow({
           />
         ) : null}
         {showStepLimit ? (
-          <StepLimitBanner onContinue={onContinueAgent} disabled={isContinueDisabled} />
+          <CompletionSummary
+            stepLimitReached
+            onContinue={onContinueAgent}
+            isContinueDisabled={isContinueDisabled}
+          />
+        ) : null}
+        {!(agentProgress || isStreaming) && message.role === "assistant" ? (
+          <CompletionSummary
+            validationSummary={message.meta?.validationSummary}
+            dialogPreview={message.meta?.dialogPreview}
+          />
+        ) : null}
+        {agentProgress?.transcript && agentProgress.transcript.length > 0 ? (
+          <DialogPreview steps={agentProgress.transcript} compact />
         ) : null}
         {actionCard ? (
           <ChatActionCardPanel

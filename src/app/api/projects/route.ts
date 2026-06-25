@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 
 import { generateFlowFromPrompt } from "@/lib/ai/flow-generator";
 import { requireUser } from "@/lib/auth/session";
+import { assertAiQuota } from "@/lib/billing/ai-usage";
+import { isAiQuotaExceededError } from "@/lib/billing/errors";
+import { runWithAiUsage } from "@/lib/billing/ai-usage-context";
 import { getDefaultDeliveryMode } from "@/lib/bot/config";
 import { syncFlowSecretDeclarations } from "@/lib/bot/project-secrets";
 import { generateWebhookSecret } from "@/lib/bot/webhook-secret";
@@ -60,9 +63,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Укажите промпт" }, { status: 400 });
     }
 
+    try {
+      await assertAiQuota(authResult.userId);
+    } catch (error) {
+      if (isAiQuotaExceededError(error)) {
+        return NextResponse.json({ error: error.message }, { status: 402 });
+      }
+      throw error;
+    }
+
     let generation: Awaited<ReturnType<typeof generateFlowFromPrompt>>;
     try {
-      generation = await generateFlowFromPrompt(prompt);
+      generation = await runWithAiUsage({ userId: authResult.userId, kind: "flow_generate" }, () =>
+        generateFlowFromPrompt(prompt),
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Не удалось сгенерировать сценарий";
       const status = message.includes("AI_API_KEY") ? 503 : 502;

@@ -1,12 +1,12 @@
 import type { Project } from "@/generated/prisma/client";
-
+import type { AgentPhase, PhaseStatus } from "@/lib/ai/flow-agent-types";
 import { buildWebhookUrl } from "@/lib/bot/config";
 import { decryptBotTokenFromStorage } from "@/lib/bot/project-token";
-
 import type { ChatBuildPlanState } from "@/lib/chat/build-plan-message";
+import { createEmptyFlow } from "@/lib/flow/default-flow";
 import type { BotFlowDocument } from "@/lib/flow/flow-schema";
 import { parseFlowJson } from "@/lib/flow/flow-schema";
-import { createEmptyFlow } from "@/lib/flow/default-flow";
+import type { TranscriptStep } from "@/lib/flow/simulate-flow";
 
 export type DeliveryMode = "webhook" | "polling";
 export type RuntimeStatus = "stopped" | "running" | "error";
@@ -44,6 +44,18 @@ export type ProjectChatMessageMeta = {
   streaming?: boolean;
   /** Снимок сценария после этого хода (для отката чата). */
   flowSnapshot?: BotFlowDocument;
+  /** Превью диалога бота (сухой прогон). */
+  dialogPreview?: TranscriptStep[];
+  /** Сводка предупреждений валидации. */
+  validationSummary?: string | null;
+  /** Прогресс многофазного агента (стриминг). */
+  agentProgress?: {
+    phases: Array<{ phase: AgentPhase; status: PhaseStatus; detail?: string }>;
+    planSteps: string[];
+    nodeCount: number;
+    statusLabel?: string;
+    transcript?: TranscriptStep[];
+  };
 };
 
 export type ProjectChatMessage = {
@@ -164,6 +176,58 @@ function parseChatMessageMeta(meta: unknown): ProjectChatMessageMeta | undefined
 
   if (raw.flowSnapshot && typeof raw.flowSnapshot === "object") {
     parsed.flowSnapshot = parseFlowJson(JSON.stringify(raw.flowSnapshot), createEmptyFlow());
+  }
+
+  if (Array.isArray(raw.dialogPreview)) {
+    const steps = raw.dialogPreview
+      .filter((step): step is TranscriptStep =>
+        Boolean(
+          step &&
+            typeof step === "object" &&
+            typeof (step as TranscriptStep).nodeId === "string" &&
+            typeof (step as TranscriptStep).text === "string",
+        ),
+      )
+      .map((step) => ({
+        nodeId: step.nodeId,
+        type: typeof step.type === "string" ? step.type : "message",
+        label: typeof step.label === "string" ? step.label : step.nodeId,
+        text: step.text,
+      }));
+    if (steps.length > 0) {
+      parsed.dialogPreview = steps;
+    }
+  }
+
+  if (typeof raw.validationSummary === "string" && raw.validationSummary.trim()) {
+    parsed.validationSummary = raw.validationSummary.trim();
+  }
+
+  if (raw.agentProgress && typeof raw.agentProgress === "object") {
+    const progress = raw.agentProgress as NonNullable<ProjectChatMessageMeta["agentProgress"]>;
+    parsed.agentProgress = {
+      phases: Array.isArray(progress.phases)
+        ? progress.phases
+            .filter(
+              (phase) =>
+                phase &&
+                typeof phase === "object" &&
+                typeof phase.phase === "string" &&
+                typeof phase.status === "string",
+            )
+            .map((phase) => ({
+              phase: phase.phase as AgentPhase,
+              status: phase.status as PhaseStatus,
+              ...(typeof phase.detail === "string" ? { detail: phase.detail } : {}),
+            }))
+        : [],
+      planSteps: Array.isArray(progress.planSteps)
+        ? progress.planSteps.filter((item): item is string => typeof item === "string")
+        : [],
+      nodeCount: typeof progress.nodeCount === "number" ? progress.nodeCount : 0,
+      ...(typeof progress.statusLabel === "string" ? { statusLabel: progress.statusLabel } : {}),
+      ...(Array.isArray(progress.transcript) ? { transcript: progress.transcript } : {}),
+    };
   }
 
   return Object.keys(parsed).length > 0 ? parsed : undefined;

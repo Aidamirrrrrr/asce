@@ -1,13 +1,9 @@
 import { generateAiReply, streamGenerateAiReply } from "@/lib/ai/ai-client";
 import { type ComposerIntent, classifyComposerIntent } from "@/lib/ai/composer-intent";
+import { buildStepLimitNotice, FLOW_AGENT_MAX_STEPS } from "@/lib/ai/flow-agent";
 import type { FlowStreamCallbacks } from "@/lib/ai/flow-generator";
 import { generateFlowFromPrompt, refineFlowFromInstruction } from "@/lib/ai/flow-generator";
 import { answerProjectDataQuestion } from "@/lib/analytics/qa-agent";
-import {
-  type ChatBuildPlanState,
-  createBuildPlanChatMessage,
-  createBuildPlanCollectingCallbacks,
-} from "@/lib/chat/build-plan-message";
 import { createEmptyFlow } from "@/lib/flow/default-flow";
 import { buildFlowCompletionReport } from "@/lib/flow/flow-completion-report";
 import type { BotFlowDocument } from "@/lib/flow/flow-schema";
@@ -51,6 +47,7 @@ export type ComposerTurnResult =
       name?: string;
       validationSummary: string | null;
       stepLimitReached?: boolean;
+      transcript?: ReturnType<typeof simulateFlow>["transcript"];
     }
   | {
       kind: "data";
@@ -63,19 +60,21 @@ function finalizeFlowAssistantMessage(
   flow: BotFlowDocument,
   stepLimitReached: boolean,
   ...contextParts: Array<string | null | undefined>
-): { message: string; validationSummary: string | null } {
-  const message = buildFlowCompletionReport(
-    flow,
-    assistantMessage,
-    ...contextParts,
-    stepLimitReached,
-  );
-  // Сводка = статическая валидация + order-aware/цикл-находки сухого прогона.
+): {
+  message: string;
+  validationSummary: string | null;
+  transcript: ReturnType<typeof simulateFlow>["transcript"];
+} {
+  const simulation = simulateFlow(flow);
+  const baseMessage = stepLimitReached
+    ? `${assistantMessage}\n\n${buildStepLimitNotice()}`
+    : assistantMessage;
+  const message = buildFlowCompletionReport(flow, baseMessage, ...contextParts, stepLimitReached);
   const validationSummary = formatFlowValidationSummary([
     ...validateFlowDocument(flow),
-    ...simulateFlow(flow).issues,
+    ...simulation.issues,
   ]);
-  return { message, validationSummary };
+  return { message, validationSummary, transcript: simulation.transcript };
 }
 
 function enrichGeneratedFlow(
@@ -95,9 +94,10 @@ function buildTurnMessages(
   options: {
     recordUserMessage: boolean;
     assistantMeta?: ProjectChatMessageMeta;
-    buildPlan?: ChatBuildPlanState | null;
     flowSnapshot?: BotFlowDocument;
     flowBefore?: BotFlowDocument;
+    transcript?: ReturnType<typeof simulateFlow>["transcript"];
+    validationSummary?: string | null;
   },
 ): ProjectChatMessage[] {
   const clearedHistory = chatHistory.map(clearStepLimitMeta);
@@ -111,14 +111,12 @@ function buildTurnMessages(
     );
   }
 
-  if (options.buildPlan) {
-    messages.push(createBuildPlanChatMessage(options.buildPlan));
-  }
-
   messages.push(
     createChatMessage("assistant", assistantContent, undefined, {
       ...options.assistantMeta,
       ...(options.flowSnapshot ? { flowSnapshot: options.flowSnapshot } : {}),
+      ...(options.transcript ? { dialogPreview: options.transcript } : {}),
+      ...(options.validationSummary ? { validationSummary: options.validationSummary } : {}),
     }),
   );
 
@@ -195,14 +193,12 @@ async function resolveFlowComposerTurn(
   input: ResolveComposerTurnInput,
 ): Promise<Extract<ComposerTurnResult, { kind: "flow" }>> {
   const { userMessage, chatHistory, currentFlow, callbacks, recordUserMessage = true } = input;
-  const { callbacks: wrappedCallbacks, getCollectedBuildPlan } =
-    createBuildPlanCollectingCallbacks(callbacks);
 
   const generation = await refineFlowFromInstruction({
     currentFlow,
     instruction: userMessage,
     chatHistory,
-    callbacks: wrappedCallbacks,
+    callbacks,
     projectId: input.projectId,
   });
 
@@ -227,13 +223,15 @@ async function resolveFlowComposerTurn(
     messages: buildTurnMessages(chatHistory, userMessage, withValidation.message, {
       recordUserMessage,
       assistantMeta,
-      buildPlan: getCollectedBuildPlan(),
       flowBefore: currentFlow,
       flowSnapshot: flow,
+      transcript: withValidation.transcript,
+      validationSummary: withValidation.validationSummary,
     }),
     flow,
     validationSummary: withValidation.validationSummary,
     stepLimitReached,
+    transcript: withValidation.transcript,
   };
 }
 
@@ -273,10 +271,8 @@ export async function resolveCreateComposerTurn(input: {
   projectId?: string;
 }): Promise<Extract<ComposerTurnResult, { kind: "flow" }>> {
   const { prompt, callbacks } = input;
-  const { callbacks: wrappedCallbacks, getCollectedBuildPlan } =
-    createBuildPlanCollectingCallbacks(callbacks);
 
-  const generation = await generateFlowFromPrompt(prompt, wrappedCallbacks, input.projectId);
+  const generation = await generateFlowFromPrompt(prompt, callbacks, input.projectId);
   const stepLimitReached = generation.stepLimitReached ?? false;
   const flow = enrichGeneratedFlow(generation.flow, prompt);
   const withValidation = finalizeFlowAssistantMessage(
@@ -286,21 +282,16 @@ export async function resolveCreateComposerTurn(input: {
     prompt,
   );
   const assistantMeta = stepLimitReached ? { stepLimitReached: true as const } : undefined;
-  const buildPlan = getCollectedBuildPlan();
+
   const messages: ProjectChatMessage[] = [
     createChatMessage("user", prompt, undefined, { flowSnapshot: createEmptyFlow() }),
-  ];
-
-  if (buildPlan) {
-    messages.push(createBuildPlanChatMessage(buildPlan));
-  }
-
-  messages.push(
     createChatMessage("assistant", withValidation.message, undefined, {
       ...assistantMeta,
       flowSnapshot: flow,
+      dialogPreview: withValidation.transcript,
+      validationSummary: withValidation.validationSummary,
     }),
-  );
+  ];
 
   return {
     kind: "flow",
@@ -310,5 +301,8 @@ export async function resolveCreateComposerTurn(input: {
     name: generation.name,
     validationSummary: withValidation.validationSummary,
     stepLimitReached,
+    transcript: withValidation.transcript,
   };
 }
+
+export { FLOW_AGENT_MAX_STEPS };
