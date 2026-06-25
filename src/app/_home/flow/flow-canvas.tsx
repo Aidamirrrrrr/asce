@@ -33,6 +33,11 @@ import { applyInferredSecretsToFlow } from "@/lib/flow/secret-recipes";
 import { collectDeclaredVariableKeys } from "@/lib/flow/set-variable-node-utils";
 import { duration } from "@/lib/motion";
 
+const STREAM_REVEAL_MS = 480;
+const STREAM_STAGGER_MS = 90;
+const STREAM_EDGE_LAG_MS = 140;
+const STREAM_LAYOUT_MS = Math.round(duration.slow * 0.55 * 1000);
+
 type FlowEditorProps = {
   projectId: string;
   flowDocument: BotFlowDocument;
@@ -102,7 +107,23 @@ function FlowEditorInner({
 
   const lastAppliedRevisionRef = useRef(0);
   const knownNodeIdsRef = useRef(new Set(flowDocument.nodes.map((node) => node.id)));
-  const streamRevealedIdsRef = useRef(new Set<string>());
+  const knownEdgeIdsRef = useRef(new Set(flowDocument.edges.map((edge) => edge.id)));
+  const streamRevealTimersRef = useRef<number[]>([]);
+  const streamPositionRafRef = useRef<number | null>(null);
+  const generationBaselineRef = useRef<{ nodes: Set<string>; edges: Set<string> } | null>(null);
+  const wasGeneratingRef = useRef(false);
+  const [streamRevealedNodeIds, setStreamRevealedNodeIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [streamRevealedEdgeIds, setStreamRevealedEdgeIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [streamDrawingEdgeIds, setStreamDrawingEdgeIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [streamRevealIndices, setStreamRevealIndices] = useState<Map<string, number>>(
+    () => new Map(),
+  );
   const manualEnterIdsRef = useRef(new Set<string>());
   const [pendingEnterIds, setPendingEnterIds] = useState<Set<string>>(() => new Set());
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
@@ -171,6 +192,138 @@ function FlowEditorInner({
     refreshNodeInternals([...handleSides.keys()]);
   }, [handleSidesSignature, refreshNodeInternals]);
 
+  const clearStreamRevealTimers = useCallback(() => {
+    for (const timerId of streamRevealTimersRef.current) {
+      window.clearTimeout(timerId);
+    }
+    streamRevealTimersRef.current = [];
+  }, []);
+
+  const scheduleStreamReveal = useCallback((callback: () => void, delay: number) => {
+    const timerId = window.setTimeout(() => {
+      streamRevealTimersRef.current = streamRevealTimersRef.current.filter((id) => id !== timerId);
+      callback();
+    }, delay);
+    streamRevealTimersRef.current.push(timerId);
+  }, []);
+
+  const scheduleStreamReveals = useCallback(
+    (
+      newNodeIds: string[],
+      newEdgeIds: string[],
+      edges: BotFlowDocument["edges"],
+    ) => {
+      if (!isFlowGenerating) {
+        return;
+      }
+
+      if (newNodeIds.length > 0) {
+        setStreamRevealIndices((current) => {
+          const next = new Map(current);
+          for (const [index, nodeId] of newNodeIds.entries()) {
+            next.set(nodeId, index);
+          }
+          return next;
+        });
+      }
+
+      for (const [index, nodeId] of newNodeIds.entries()) {
+        scheduleStreamReveal(() => {
+          setStreamRevealedNodeIds((current) => {
+            const next = new Set(current);
+            next.add(nodeId);
+            return next;
+          });
+        }, STREAM_REVEAL_MS + index * STREAM_STAGGER_MS);
+      }
+
+      for (const edgeId of newEdgeIds) {
+        const edge = edges.find((item) => item.id === edgeId);
+        const sourceIndex = edge ? newNodeIds.indexOf(edge.source) : -1;
+        const targetIndex = edge ? newNodeIds.indexOf(edge.target) : -1;
+        const anchorIndex = Math.max(sourceIndex, targetIndex, 0);
+        const edgeDelay = STREAM_REVEAL_MS + anchorIndex * STREAM_STAGGER_MS + STREAM_EDGE_LAG_MS;
+
+        scheduleStreamReveal(() => {
+          setStreamDrawingEdgeIds((current) => {
+            const next = new Set(current);
+            next.add(edgeId);
+            return next;
+          });
+          setStreamRevealedEdgeIds((current) => {
+            const next = new Set(current);
+            next.add(edgeId);
+            return next;
+          });
+          scheduleStreamReveal(() => {
+            setStreamDrawingEdgeIds((current) => {
+              const next = new Set(current);
+              next.delete(edgeId);
+              return next;
+            });
+          }, Math.round(duration.normal * 1000));
+        }, edgeDelay);
+      }
+    },
+    [isFlowGenerating, scheduleStreamReveal],
+  );
+
+  const runStreamPositionTween = useCallback(
+    (
+      movedNodeIds: string[],
+      targetPositions: Map<string, { x: number; y: number }>,
+      startPositions: Map<string, { x: number; y: number }>,
+    ) => {
+      if (movedNodeIds.length === 0) {
+        return;
+      }
+
+      if (streamPositionRafRef.current != null) {
+        cancelAnimationFrame(streamPositionRafRef.current);
+      }
+
+      const easeOutCubic = (t: number) => 1 - (1 - t) ** 3;
+      const startedAt = performance.now();
+
+      const tick = (now: number) => {
+        const progress = Math.min(1, (now - startedAt) / STREAM_LAYOUT_MS);
+        const k = easeOutCubic(progress);
+
+        setNodes((prev) =>
+          prev.map((node) => {
+            if (!movedNodeIds.includes(node.id)) {
+              return node;
+            }
+
+            const target = targetPositions.get(node.id);
+            const start = startPositions.get(node.id);
+            if (!(target && start)) {
+              return node;
+            }
+
+            return {
+              ...node,
+              position: {
+                x: start.x + (target.x - start.x) * k,
+                y: start.y + (target.y - start.y) * k,
+              },
+            };
+          }),
+        );
+
+        if (progress < 1) {
+          streamPositionRafRef.current = requestAnimationFrame(tick);
+          return;
+        }
+
+        streamPositionRafRef.current = null;
+      };
+
+      streamPositionRafRef.current = requestAnimationFrame(tick);
+    },
+    [setNodes],
+  );
+
   const displayNodes = useMemo(
     () =>
       nodes.map((node, index) => ({
@@ -178,8 +331,10 @@ function FlowEditorInner({
         data: {
           ...node.data,
           isEntering: !isFlowGenerating && (pendingEnterIds.has(node.id) || !revealed),
-          streamReveal: isFlowGenerating && !streamRevealedIdsRef.current.has(node.id),
-          revealIndex: manualEnterIdsRef.current.has(node.id) ? 0 : index,
+          streamReveal: isFlowGenerating && !streamRevealedNodeIds.has(node.id),
+          revealIndex:
+            streamRevealIndices.get(node.id) ??
+            (manualEnterIdsRef.current.has(node.id) ? 0 : index),
           isDragging: node.id === draggingNodeId,
           backLinks: backNavigation.backLinksByNode.get(node.id),
           handleSides: handleSides.get(node.id),
@@ -191,6 +346,8 @@ function FlowEditorInner({
       pendingEnterIds,
       revealed,
       isFlowGenerating,
+      streamRevealedNodeIds,
+      streamRevealIndices,
       draggingNodeId,
       backNavigation,
       handleSides,
@@ -202,11 +359,22 @@ function FlowEditorInner({
     () =>
       edges.map((edge, index) => {
         const isBack = backNavigation.backEdgeIds.has(edge.id);
+        const streamPending =
+          isFlowGenerating &&
+          !streamRevealedEdgeIds.has(edge.id) &&
+          !streamDrawingEdgeIds.has(edge.id) &&
+          !isBack;
+
         return {
           ...withFlowBusEdgeType(edge),
+          data: {
+            ...edge.data,
+            streamReveal: streamDrawingEdgeIds.has(edge.id),
+            streamRevealDelay: 0,
+          },
           style: {
             ...edge.style,
-            opacity: isBack ? 0 : isFlowGenerating || revealed ? 1 : 0,
+            opacity: isBack ? 0 : streamPending ? 0 : isFlowGenerating || revealed ? 1 : 0,
             pointerEvents: isBack ? ("none" as const) : undefined,
             transition:
               !(isBack || isFlowGenerating) && revealed
@@ -216,19 +384,51 @@ function FlowEditorInner({
           interactionWidth: isBack ? 0 : undefined,
         };
       }),
-    [edges, revealed, isFlowGenerating, backNavigation],
+    [
+      edges,
+      revealed,
+      isFlowGenerating,
+      streamRevealedEdgeIds,
+      streamDrawingEdgeIds,
+      backNavigation,
+    ],
   );
 
   useEffect(() => {
     if (!isFlowGenerating) {
-      streamRevealedIdsRef.current.clear();
+      clearStreamRevealTimers();
+      generationBaselineRef.current = null;
+      setStreamRevealedNodeIds(new Set());
+      setStreamRevealedEdgeIds(new Set());
+      setStreamDrawingEdgeIds(new Set());
+      setStreamRevealIndices(new Map());
       return;
     }
 
-    for (const node of nodes) {
-      streamRevealedIdsRef.current.add(node.id);
+    if (generationBaselineRef.current) {
+      return;
     }
-  }, [nodes, isFlowGenerating]);
+
+    generationBaselineRef.current = {
+      nodes: new Set(knownNodeIdsRef.current),
+      edges: new Set(knownEdgeIdsRef.current),
+    };
+    setStreamRevealedNodeIds(new Set(generationBaselineRef.current.nodes));
+    setStreamRevealedEdgeIds(new Set(generationBaselineRef.current.edges));
+    setStreamDrawingEdgeIds(new Set());
+  }, [clearStreamRevealTimers, isFlowGenerating]);
+
+  useEffect(() => {
+    if (wasGeneratingRef.current && !isFlowGenerating && nodes.length > 0) {
+      requestAnimationFrame(() => {
+        fitView({
+          padding: 0.25,
+          duration: Math.round(duration.slow * 1000),
+        });
+      });
+    }
+    wasGeneratingRef.current = isFlowGenerating;
+  }, [fitView, isFlowGenerating, nodes.length]);
 
   useEffect(() => {
     if (
@@ -245,6 +445,9 @@ function FlowEditorInner({
     const newIds = externalDocument.nodes
       .map((node) => node.id)
       .filter((id) => !knownNodeIdsRef.current.has(id));
+    const newEdgeIds = externalDocument.edges
+      .map((edge) => edge.id)
+      .filter((id) => !knownEdgeIdsRef.current.has(id));
 
     metadataRef.current = {
       secrets: externalDocument.secrets ?? metadataRef.current.secrets,
@@ -255,9 +458,37 @@ function FlowEditorInner({
       setPendingEnterIds(new Set(newIds));
     }
 
+    const startPositions = new Map(
+      nodes.map((node) => [node.id, { x: node.position.x, y: node.position.y }]),
+    );
+    const targetPositions = new Map(
+      externalDocument.nodes.map((node) => [node.id, { x: node.position.x, y: node.position.y }]),
+    );
+    const movedNodeIds = externalDocument.nodes
+      .filter((node) => {
+        const start = startPositions.get(node.id);
+        if (!start) {
+          return false;
+        }
+        const target = targetPositions.get(node.id);
+        if (!target) {
+          return false;
+        }
+        return start.x !== target.x || start.y !== target.y;
+      })
+      .map((node) => node.id);
+
     replaceDocument(externalDocument.nodes, externalDocument.edges, externalDocument.viewport);
 
+    if (isFlowGenerating) {
+      scheduleStreamReveals(newIds, newEdgeIds, externalDocument.edges);
+      if (movedNodeIds.length > 0) {
+        runStreamPositionTween(movedNodeIds, targetPositions, startPositions);
+      }
+    }
+
     knownNodeIdsRef.current = new Set(externalDocument.nodes.map((node) => node.id));
+    knownEdgeIdsRef.current = new Set(externalDocument.edges.map((edge) => edge.id));
     refreshNodeInternals(externalDocument.nodes.map((node) => node.id));
 
     requestAnimationFrame(() => {
@@ -286,8 +517,11 @@ function FlowEditorInner({
     fitView,
     focusStreamNode,
     isFlowGenerating,
+    nodes,
     replaceDocument,
     refreshNodeInternals,
+    runStreamPositionTween,
+    scheduleStreamReveals,
   ]);
 
   // После генерации (и при загрузке сохранённого сценария) синхронизируем проп
@@ -300,6 +534,7 @@ function FlowEditorInner({
     skipChangeRef.current = true;
     replaceDocument(flowDocument.nodes, flowDocument.edges);
     knownNodeIdsRef.current = new Set(flowDocument.nodes.map((node) => node.id));
+    knownEdgeIdsRef.current = new Set(flowDocument.edges.map((edge) => edge.id));
     lastAppliedRevisionRef.current = documentRevision;
     refreshNodeInternals(flowDocument.nodes.map((node) => node.id));
 
@@ -504,11 +739,15 @@ function FlowEditorInner({
 
   useEffect(() => {
     return () => {
+      clearStreamRevealTimers();
       if (alignRafRef.current != null) {
         cancelAnimationFrame(alignRafRef.current);
       }
+      if (streamPositionRafRef.current != null) {
+        cancelAnimationFrame(streamPositionRafRef.current);
+      }
     };
-  }, []);
+  }, [clearStreamRevealTimers]);
 
   useEffect(() => {
     if (!relayoutRef) {

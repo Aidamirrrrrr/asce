@@ -27,12 +27,15 @@ export function getNodeRevealMotionProps(data: FlowNodeData & FlowNodeTransientD
     };
   }
 
-  // AI-стриминг: нода появляется снизу вверх с пружиной.
+  // AI-стриминг: нода появляется снизу вверх с пружиной (с лёгким каскадом).
   if (streamReveal) {
     return {
-      initial: { opacity: 0, scale: 0.88, y: 10 },
+      initial: { opacity: 0, scale: 0.88, y: 14 },
       animate: { opacity: 1, scale: 1, y: 0 },
-      transition: nodeEnterSpring,
+      transition: {
+        ...nodeEnterSpring,
+        delay: revealIndex * 0.09,
+      },
     };
   }
 

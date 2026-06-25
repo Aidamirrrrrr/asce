@@ -272,6 +272,11 @@ export type BotFlowDocument = {
   variables?: FlowVariableDeclaration[];
 };
 
+export type FlowEdgeTransientData = {
+  streamReveal?: boolean;
+  streamRevealDelay?: number;
+};
+
 export type FlowNodeTransientData = {
   isExiting?: boolean;
   isEntering?: boolean;
